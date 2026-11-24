@@ -1,14 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAutoAnimate } from "@formkit/auto-animate/react";
 import { motion, useReducedMotion } from "motion/react";
-import { createWalletClient, custom, parseUnits, type Address, type EIP1193Provider, type Hex } from "viem";
+import { parseUnits, type Address, type Hex } from "viem";
+import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBar, CardContent } from "@/components/ui/card";
+import { WalletBar } from "@/components/wallet-bar";
 import {
-  aevumTestnet, cancelAuthTypedData, explorerAddress, explorerTx, POOL_ADDRESS, publicClient,
+  cancelAuthTypedData, explorerAddress, explorerTx, POOL_ADDRESS, publicClient,
   quorumPoolAbi, receiveAuthTypedData, TUSD8_DECIMALS,
 } from "@/lib/aevum";
 import type { AdapterMode } from "@/lib/config";
@@ -19,69 +22,40 @@ import { withTimeoutAndRetry } from "@/lib/http";
 import { PRACTICE_NONCE, PRACTICE_SIGNATURE } from "@/lib/schemas";
 import type { Campaign, Pledge, RelayOk, SettleTransfer } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import {
+  AEVUM_CHAIN_ID,
+  accountOf,
+  connectInjected,
+  failureState,
+  idempotencyKey,
+  isBusy,
+  TxError,
+  walletClient,
+  type TxAction,
+  type WalletState,
+} from "@/lib/wallet-state";
 
 type LogEntry = { label: string; tx: string; mock: boolean };
-type Phase = { kind: "idle" } | { kind: "busy"; what: string } | { kind: "error"; message: string };
 type Receipt = { tx: string; mock: boolean; transfers?: SettleTransfer[]; sellerTotal?: number };
+/** What one action hands back: the relay answer plus the local change to apply once it is confirmed. */
+type Outcome = { ok: RelayOk; apply: () => void };
+type Task = (who: Address | null, progress: (label: string) => void) => Promise<Outcome>;
 
-/** Codes from /api/relay plus two the browser raises itself. */
-type RoomErrorCode = ErrorCode | "wallet_missing" | "wallet_refused";
-
-class RoomError extends Error {
-  readonly code: RoomErrorCode;
-  constructor(code: RoomErrorCode, hint: string) {
-    super(hint);
-    this.code = code;
-  }
-}
-
-/** Copy is chosen by error code; the server hint is used only where it names the exact contract rule. */
-function messageFor(err: unknown, fallback: string): string {
-  if (!(err instanceof RoomError)) {
-    const text = err instanceof Error ? err.message : "";
-    return /reject|denied|cancel/i.test(text) ? "The wallet request was declined. Nothing was signed." : fallback;
-  }
-  switch (err.code) {
-    case "invalid_input":
-    case "reverted":
-      return err.message;
-    case "rate_limited":
-      return "Too many tries from this connection. Wait a minute and try again.";
-    case "upstream_timeout":
-      return "Aevum testnet is slow to answer. Nothing was charged; try again in a moment.";
-    case "upstream_error":
-    case "parse_failure":
-      return "The relayer could not reach Aevum testnet. Nothing was charged.";
-    case "not_configured":
-      return "Live relaying is switched off on this deploy. The seeded batches still work in practice mode.";
-    case "wallet_missing":
-      return "Open a browser wallet on Aevum testnet to sign.";
-    case "wallet_refused":
-      return "The wallet request was declined. Nothing was signed.";
-  }
-}
+/** The practice "connected account": the first seeded demo wallet. */
+const PRACTICE_ACCOUNT = DEMO_SIGNERS[0].address as Address;
 
 async function relay(body: Record<string, unknown>): Promise<RelayOk> {
-  const res = await fetch("/api/relay", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  let res: Response;
+  try {
+    res = await fetch("/api/relay", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  } catch {
+    throw new TxError("upstream_error", "");
+  }
   const json = (await res.json().catch(() => null)) as (Partial<RelayOk> & { error?: ErrorCode; hint?: string }) | null;
   if (!res.ok || !json || !json.txHash) {
-    throw new RoomError(json?.error ?? "upstream_error", json?.hint ?? "The relayer did not answer.");
+    throw new TxError(json?.error ?? "upstream_error", json?.hint ?? "");
   }
   return { mode: json.mode ?? "mock", txHash: json.txHash, transfers: json.transfers, sellerTotal: json.sellerTotal };
-}
-
-function injected(): EIP1193Provider | undefined {
-  return (window as unknown as { ethereum?: EIP1193Provider }).ethereum;
-}
-
-async function liveWallet() {
-  const eth = injected();
-  if (!eth) throw new RoomError("wallet_missing", "No browser wallet.");
-  const wallet = createWalletClient({ chain: aevumTestnet, transport: custom(eth) });
-  const [account] = await wallet.requestAddresses();
-  if (!account) throw new RoomError("wallet_refused", "No account.");
-  await wallet.switchChain({ id: aevumTestnet.id }).catch(() => wallet.addChain({ chain: aevumTestnet }));
-  return { wallet, account };
 }
 
 function readNonce(poolId: number, buyer: Address): Promise<Hex> {
@@ -90,16 +64,33 @@ function readNonce(poolId: number, buyer: Address): Promise<Hex> {
   );
 }
 
+const activeOf = (c: Campaign) => c.pledges.filter((p) => p.state !== "withdrawn");
+const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
 export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: AdapterMode }) {
   const reduce = useReducedMotion();
+  const router = useRouter();
   const [listRef] = useAutoAnimate<HTMLOListElement>();
   // Live only for a numeric pool id while the server says the real adapter is on.
   // Seed slugs always stay in practice mode, whatever the deploy.
   const live = mode === "real" && Boolean(POOL_ADDRESS) && /^\d+$/.test(campaign.id);
+
+  const [state, setStateRaw] = useState<WalletState>(
+    live ? { kind: "disconnected" } : { kind: "idle", account: PRACTICE_ACCOUNT, practice: true },
+  );
+  // Async handlers read the latest state through this ref, so a retry never acts on a stale render.
+  const stateRef = useRef(state);
+  const setState = (s: WalletState) => {
+    stateRef.current = s;
+    setStateRaw(s);
+  };
+  const lastRun = useRef<(() => void) | null>(null);
+  const clicks = useRef(0);
+
   const [status, setStatus] = useState(campaign.status);
-  const [pledges, setPledges] = useState<Pledge[]>(campaign.pledges.filter((p) => p.state !== "withdrawn"));
-  const [mine, setMine] = useState<Address | null>(null);
-  const [phase, setPhase] = useState<Phase>({ kind: "idle" });
+  const [pledges, setPledges] = useState<Pledge[]>(activeOf(campaign));
+  // Practice only: the demo wallet that signed last, so it can withdraw.
+  const [practiceMine, setPracticeMine] = useState<Address | null>(null);
   const [log, setLog] = useState<LogEntry[]>(
     campaign.createTx !== "0x" ? [{ label: "Batch opened", tx: campaign.createTx, mock: !live }] : [],
   );
@@ -108,88 +99,168 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
     campaign.settleTx ? { tx: campaign.settleTx, mock: !live } : null,
   );
 
+  // After router.refresh() the server component sends a fresh campaign read from the
+  // chain. Adopt it during render (no effect, no client fetch).
+  const [synced, setSynced] = useState(campaign);
+  if (synced !== campaign) {
+    setSynced(campaign);
+    setPledges(activeOf(campaign));
+    setStatus(campaign.status);
+    if (campaign.settleTx) setReceipt((r) => r ?? { tx: campaign.settleTx!, mock: false });
+  }
+
+  const account = accountOf(state);
+  const busy = isBusy(state);
   const count = pledges.length;
   const ready = status === "open" && count >= campaign.minOrders;
-  const iAmIn = mine !== null && pledges.some((p) => p.address.toLowerCase() === mine.toLowerCase());
+  // Live: a returning signer is recognised from the chain data in props as soon as the wallet connects.
+  const mine: Address | null = live
+    ? account && state.kind !== "wrong-network" && pledges.some((p) => same(p.address, account)) ? account : null
+    : practiceMine;
+  const iAmIn = mine !== null;
   // Practice mode lets the next demo wallet sign while the last one can still withdraw,
   // so the counter can be walked all the way to the threshold.
   const practiceLeft = !live && DEMO_SIGNERS.some((s) => !pledges.some((p) => p.address === s.address));
   const canJoin = live ? !iAmIn : practiceLeft;
 
-  async function join() {
-    setPhase({ kind: "busy", what: "Waiting for your signature…" });
+  async function connect(): Promise<Address | null> {
+    setState({ kind: "connecting" });
     try {
-      let who: { buyer: string; address: Address };
-      let r: RelayOk;
-      if (live) {
-        const { wallet, account } = await liveWallet();
-        const nonce = await readNonce(campaign.poolId, account);
+      const { account: who, chainId } = await connectInjected();
+      if (chainId !== AEVUM_CHAIN_ID) {
+        setState({ kind: "wrong-network", account: who, chainId });
+        return null;
+      }
+      setState({ kind: "idle", account: who, practice: false });
+      return who;
+    } catch (err) {
+      setState(failureState(err, { action: "connect", account: null, practice: false }));
+      return null;
+    }
+  }
+
+  /**
+   * Every write runs through here: connect if a live wallet is needed, tx-pending while it
+   * runs, tx-confirmed or tx-rejected / tx-failed after. The task is kept for retry, and
+   * the task itself holds the idempotency key, so a retry re-sends the same key.
+   */
+  async function submit(action: TxAction, label: string, needsWallet: boolean, task: Task) {
+    lastRun.current = () => void submit(action, label, needsWallet, task);
+    const current = stateRef.current;
+    let who: Address | null = current.kind === "wrong-network" ? null : accountOf(current);
+    if (live && needsWallet && !who) {
+      who = await connect();
+      if (!who) return;
+    }
+    const practice = !live;
+    setState({ kind: "tx-pending", account: who, practice, action, label });
+    try {
+      const out = await task(who, (next) => setState({ kind: "tx-pending", account: who, practice, action, label: next }));
+      out.apply();
+      setState({ kind: "tx-confirmed", account: who, practice, action, txHash: out.ok.txHash, mock: out.ok.mode === "mock" });
+      // Live writes changed the chain: re-read the pool through the server component.
+      // Practice never refreshes, because that would reset the in-memory practice state.
+      if (out.ok.mode === "live") router.refresh();
+    } catch (err) {
+      setState(failureState(err, { action, account: who, practice }));
+    }
+  }
+
+  function join() {
+    const click = ++clicks.current;
+    void submit("pledge", live ? "Waiting for your signature in the wallet." : "A practice wallet is signing.", true, async (who, progress) => {
+      if (live && who) {
+        const me: Address = who;
+        const nonce = await readNonce(campaign.poolId, me);
         const typed = receiveAuthTypedData({
-          buyer: account,
+          buyer: me,
           price: parseUnits(String(campaign.pricePerOrder), TUSD8_DECIMALS),
           deadline: BigInt(Math.floor(new Date(campaign.deadline).getTime() / 1000)),
           nonce,
         });
-        const signature = await wallet.signTypedData({ account, ...typed });
-        setPhase({ kind: "busy", what: "Relayer is posting your signature…" });
-        r = await relay({ action: "pledge", poolId: campaign.poolId, buyer: account, signature });
-        who = { buyer: "You", address: account };
-      } else {
-        const next = DEMO_SIGNERS.find((s) => !pledges.some((p) => p.address === s.address));
-        if (!next) throw new RoomError("invalid_input", "All practice wallets have signed. Withdraw one to try again.");
-        r = await relay({ action: "pledge", poolId: campaign.poolId, buyer: next.address, signature: PRACTICE_SIGNATURE, practice: true });
-        who = next;
+        const signature = await walletClient().signTypedData({ account: me, ...typed });
+        progress("The relayer is posting your signature to Aevum. No gas from you.");
+        const ok = await relay({
+          action: "pledge", poolId: campaign.poolId, buyer: me, signature,
+          idempotencyKey: idempotencyKey("pledge", campaign.poolId, me, nonce),
+        });
+        return {
+          ok,
+          apply: () => {
+            setPledges((p) => (p.some((x) => same(x.address, me)) ? p : [...p, { buyer: "You", address: me, signedAt: new Date().toISOString(), state: "signed", balance: 0 }]));
+            setLog((l) => [{ label: "You signed, no gas paid", tx: ok.txHash, mock: false }, ...l]);
+          },
+        };
       }
-      const mock = r.mode === "mock";
-      setPledges((p) => [...p, { buyer: who.buyer, address: who.address, signedAt: new Date().toISOString(), state: "signed", balance: 0 }]);
-      setMine(who.address);
-      setLog((l) => [{ label: `${who.buyer} signed, no gas paid`, tx: r.txHash, mock }, ...l]);
-      setPhase({ kind: "idle" });
-    } catch (err) {
-      setPhase({ kind: "error", message: messageFor(err, "Signing did not go through. Nothing was charged.") });
-    }
+      const next = DEMO_SIGNERS.find((s) => !pledges.some((p) => p.address === s.address));
+      if (!next) throw new TxError("invalid_input", "All practice wallets have signed. Withdraw one to try again.");
+      const ok = await relay({
+        action: "pledge", poolId: campaign.poolId, buyer: next.address, signature: PRACTICE_SIGNATURE, practice: true,
+        idempotencyKey: idempotencyKey("pledge", campaign.poolId, next.address, `click-${click}`),
+      });
+      return {
+        ok,
+        apply: () => {
+          setPledges((p) => [...p, { buyer: next.buyer, address: next.address, signedAt: new Date().toISOString(), state: "signed", balance: 0 }]);
+          setPracticeMine(next.address as Address);
+          setLog((l) => [{ label: `${next.buyer} signed, no gas paid`, tx: ok.txHash, mock: ok.mode === "mock" }, ...l]);
+        },
+      };
+    });
   }
 
-  async function withdraw() {
-    if (!mine) return;
-    setPhase({ kind: "busy", what: "Cancelling your authorization…" });
-    try {
-      let r: RelayOk;
+  function withdraw() {
+    const click = ++clicks.current;
+    const target = mine;
+    if (!target) return;
+    const name = pledges.find((p) => same(p.address, target))?.buyer ?? "A buyer";
+    void submit("cancel", live ? "Sign the cancellation in your wallet." : "Cancelling the practice authorization.", true, async (_who, progress) => {
+      let ok: RelayOk;
       if (live) {
-        const { wallet } = await liveWallet();
-        const nonce = await readNonce(campaign.poolId, mine);
-        const signature = await wallet.signTypedData({ account: mine, ...cancelAuthTypedData({ buyer: mine, nonce }) });
-        setPhase({ kind: "busy", what: "Relayer is cancelling on tUSD8, then withdrawing from the pool…" });
-        r = await relay({ action: "cancel", poolId: campaign.poolId, buyer: mine, nonce, signature });
+        const nonce = await readNonce(campaign.poolId, target);
+        const signature = await walletClient().signTypedData({ account: target, ...cancelAuthTypedData({ buyer: target, nonce }) });
+        progress("The relayer is cancelling on tUSD8, then withdrawing you from the pool.");
+        ok = await relay({
+          action: "cancel", poolId: campaign.poolId, buyer: target, nonce, signature,
+          idempotencyKey: idempotencyKey("cancel", campaign.poolId, target, nonce),
+        });
       } else {
-        r = await relay({
-          action: "cancel", poolId: campaign.poolId, buyer: mine, nonce: PRACTICE_NONCE, signature: PRACTICE_SIGNATURE, practice: true,
+        ok = await relay({
+          action: "cancel", poolId: campaign.poolId, buyer: target, nonce: PRACTICE_NONCE, signature: PRACTICE_SIGNATURE, practice: true,
+          idempotencyKey: idempotencyKey("cancel", campaign.poolId, target, `click-${click}`),
         });
       }
-      const name = pledges.find((p) => p.address === mine)?.buyer ?? "A buyer";
-      setPledges((p) => p.filter((x) => x.address !== mine));
-      setMine(null);
-      setLog((l) => [{ label: `${name} withdrew, authorization cancelled`, tx: r.txHash, mock: r.mode === "mock" }, ...l]);
-      setPhase({ kind: "idle" });
-    } catch (err) {
-      setPhase({ kind: "error", message: messageFor(err, "Withdrawal did not go through. Your signature is still live.") });
-    }
+      return {
+        ok,
+        apply: () => {
+          setPledges((p) => p.filter((x) => !same(x.address, target)));
+          if (!live) setPracticeMine(null);
+          setLog((l) => [{ label: `${name} withdrew, authorization cancelled`, tx: ok.txHash, mock: ok.mode === "mock" }, ...l]);
+        },
+      };
+    });
   }
 
-  async function collect() {
-    setPhase({ kind: "busy", what: `Collecting ${count} payments in one transaction…` });
-    try {
-      const r = await relay({ action: "settle", poolId: campaign.poolId, ...(live ? {} : { practice: true }) });
-      const mock = r.mode === "mock";
-      const total = r.sellerTotal ?? count * campaign.pricePerOrder;
-      setReceipt({ tx: r.txHash, mock, transfers: r.transfers, sellerTotal: r.sellerTotal });
-      setStatus("settled");
-      setPledges((p) => p.map((x) => ({ ...x, state: "collected" })));
-      setLog((l) => [{ label: `${count} payments collected, ${formatTusd(total)} to ${campaign.maker}`, tx: r.txHash, mock }, ...l]);
-      setPhase({ kind: "idle" });
-    } catch (err) {
-      setPhase({ kind: "error", message: messageFor(err, "Collection reverted. Nobody was charged.") });
-    }
+  function collect() {
+    const click = ++clicks.current;
+    const orders = count;
+    // Anyone can collect and the relayer pays the gas, so no wallet is needed here.
+    void submit("settle", `Collecting ${orders} payments in one transaction.`, false, async () => {
+      const ok = await relay({
+        action: "settle", poolId: campaign.poolId, ...(live ? {} : { practice: true }),
+        idempotencyKey: idempotencyKey("settle", campaign.poolId, POOL_ADDRESS ?? "pool", live ? "settle" : `click-${click}`),
+      });
+      const total = ok.sellerTotal ?? orders * campaign.pricePerOrder;
+      return {
+        ok,
+        apply: () => {
+          setReceipt({ tx: ok.txHash, mock: ok.mode === "mock", transfers: ok.transfers, sellerTotal: ok.sellerTotal });
+          setStatus("settled");
+          setPledges((p) => p.map((x) => ({ ...x, state: "collected" })));
+          setLog((l) => [{ label: `${orders} payments collected, ${formatTusd(total)} to ${campaign.maker}`, tx: ok.txHash, mock: ok.mode === "mock" }, ...l]);
+        },
+      };
+    });
   }
 
   async function copyLink() {
@@ -199,7 +270,7 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
   }
 
   const pct = Math.min(100, (count / campaign.minOrders) * 100);
-  const nameOf = (a: string) => pledges.find((p) => p.address.toLowerCase() === a.toLowerCase())?.buyer ?? shortHex(a);
+  const nameOf = (a: string) => pledges.find((p) => same(p.address, a))?.buyer ?? shortHex(a);
 
   // Receipt rows: decoded tUSD8 transfers into the pool when the relayer sent them, else one row per signer.
   const pool = POOL_ADDRESS?.toLowerCase();
@@ -208,6 +279,7 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
     ? decodedIn.map((t) => ({ key: `${t.from}-${t.amount}`, buyer: nameOf(t.from), address: t.from, amount: t.amount }))
     : pledges.map((p) => ({ key: p.address, buyer: p.buyer, address: p.address, amount: campaign.pricePerOrder }));
   const sellerTotal = receipt?.sellerTotal ?? receiptRows.reduce((n, r) => n + r.amount, 0);
+  const quiet = state.kind === "idle" || state.kind === "tx-confirmed";
 
   return (
     <div className="grid gap-8 lg:grid-cols-12">
@@ -243,19 +315,35 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
             />
           </div>
 
+          {status === "open" && (
+            <WalletBar
+              state={state}
+              onConnect={
+                live
+                  ? () => {
+                      lastRun.current = () => void connect();
+                      void connect();
+                    }
+                  : undefined
+              }
+              onSwitched={() => void connect()}
+              onRetry={() => lastRun.current?.()}
+            />
+          )}
+
           <div className="flex flex-wrap gap-3">
             {status === "open" && canJoin && (
-              <Button size="lg" onClick={join} disabled={phase.kind === "busy" || count >= campaign.maxOrders}>
+              <Button id="sign" size="lg" onClick={join} disabled={busy || count >= campaign.maxOrders}>
                 Count me in
               </Button>
             )}
             {status === "open" && iAmIn && (
-              <Button size="lg" variant="destructive" onClick={withdraw} disabled={phase.kind === "busy"}>
+              <Button size="lg" variant="destructive" onClick={withdraw} disabled={busy}>
                 Withdraw my signature
               </Button>
             )}
             {status === "open" && (
-              <Button size="lg" variant="secondary" onClick={collect} disabled={!ready || phase.kind === "busy"}>
+              <Button size="lg" variant="secondary" onClick={collect} disabled={!ready || busy}>
                 Collect all payments
               </Button>
             )}
@@ -264,22 +352,20 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
             </Button>
           </div>
 
-          <div role="status" className="min-h-6 text-sm">
-            {phase.kind === "busy" && <p>{phase.what}</p>}
-            {phase.kind === "error" && <p className="border-2 border-bad px-3 py-2 text-bad">{phase.message}</p>}
-            {phase.kind === "idle" && status === "open" && (
+          <div className="min-h-6 text-sm">
+            {quiet && status === "open" && (
               <p>
                 {ready
                   ? "The minimum is met. Anyone can press collect; every payment moves in the same transaction."
                   : `${campaign.minOrders - count} more signatures needed. Your balance does not change when you sign.`}
               </p>
             )}
-            {phase.kind === "idle" && status === "settled" && <p className="font-semibold text-ok">Every signed buyer paid once, in one transaction.</p>}
-            {phase.kind === "idle" && status === "lapsed" && <p>The deadline passed below the minimum. Every signature expired unused.</p>}
+            {status === "settled" && <p className="font-semibold text-ok">Every signed buyer paid once, in one transaction.</p>}
+            {status === "lapsed" && <p>The deadline passed below the minimum. Every signature expired unused.</p>}
           </div>
           {!live && (
             <p className="text-xs text-muted-foreground">
-              Practice mode: signatures come from demo wallets and hashes are placeholders, nothing is sent to Aevum.
+              Practice mode: signatures come from demo wallets and hashes are placeholders, nothing is sent to Aevum. Reload the page to start over.
             </p>
           )}
         </CardContent>
@@ -292,7 +378,20 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
             <span>{count}</span>
           </CardBar>
           <ol ref={listRef} className="divide-y-2 divide-foreground">
-            {pledges.length === 0 && <li className="px-4 py-6 text-sm">No signatures yet. Be the first.</li>}
+            {pledges.length === 0 && (
+              <li className="p-4">
+                {status === "open" ? (
+                  <EmptyState
+                    title="No signatures yet"
+                    body={`This batch needs ${campaign.minOrders} signatures at ${formatTusd(campaign.pricePerOrder)}. Signing moves no money.`}
+                    href="#sign"
+                    cta="Count me in"
+                  />
+                ) : (
+                  <p className="text-sm">Nobody signed this batch.</p>
+                )}
+              </li>
+            )}
             {pledges.map((p) => (
               <li key={p.address} className="flex items-center justify-between gap-3 overflow-x-auto px-4 py-2.5 text-sm">
                 <span className="min-w-0">
