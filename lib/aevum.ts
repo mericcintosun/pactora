@@ -8,6 +8,7 @@ import {
   createPublicClient,
   defineChain,
   encodeAbiParameters,
+  fallback,
   formatUnits,
   http,
   keccak256,
@@ -21,6 +22,7 @@ import type { Campaign, Pledge, PledgeState } from "@/lib/types";
 import {
   AEVUM_CHAIN_ID,
   AEVUM_RPC,
+  AEVUM_RPC_FALLBACKS,
   CALL_TIMEOUT_MS,
   EXPLORER_URL,
   HISTORY_BUDGET_MS,
@@ -50,15 +52,24 @@ export const aevumTestnet = defineChain({
   id: AEVUM_CHAIN_ID,
   name: "Aevum Testnet",
   nativeCurrency: { name: "tQDAY", symbol: "tQDAY", decimals: 18 },
-  rpcUrls: { default: { http: [AEVUM_RPC] } },
+  rpcUrls: { default: { http: [AEVUM_RPC, ...AEVUM_RPC_FALLBACKS] } },
   blockExplorers: { default: { name: "Aevum Explorer", url: EXPLORER_URL } },
   contracts: { multicall3: { address: MULTICALL3 } },
 });
 
-// viem's own retries are off: withTimeoutAndRetry owns the single retry.
+/**
+ * HTTP transport over AEVUM_RPC, then each NEXT_PUBLIC_AEVUM_RPC_FALLBACKS URL in order.
+ * viem's own retries are off: withTimeoutAndRetry owns the single retry.
+ */
+export function aevumTransport() {
+  const one = (url: string) => http(url, { timeout: CALL_TIMEOUT_MS, retryCount: 0 });
+  if (AEVUM_RPC_FALLBACKS.length === 0) return one(AEVUM_RPC);
+  return fallback([AEVUM_RPC, ...AEVUM_RPC_FALLBACKS].map(one), { rank: false, retryCount: 0 });
+}
+
 export const publicClient = createPublicClient({
   chain: aevumTestnet,
-  transport: http(AEVUM_RPC, { timeout: CALL_TIMEOUT_MS, retryCount: 0 }),
+  transport: aevumTransport(),
 });
 
 export const quorumPoolAbi = [

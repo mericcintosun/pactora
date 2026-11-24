@@ -15,6 +15,12 @@ export const AEVUM_CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID || 44005);
 /** Aevum JSON-RPC endpoint. NEXT_PUBLIC_AEVUM_RPC. */
 export const AEVUM_RPC = process.env.NEXT_PUBLIC_AEVUM_RPC || "https://rpc-test.qday.info";
 
+/** Optional extra Aevum RPC endpoints, tried in order when AEVUM_RPC fails. NEXT_PUBLIC_AEVUM_RPC_FALLBACKS, comma separated. */
+export const AEVUM_RPC_FALLBACKS: string[] = (process.env.NEXT_PUBLIC_AEVUM_RPC_FALLBACKS || "")
+  .split(",")
+  .map((u) => u.trim())
+  .filter((u) => /^https?:\/\//.test(u) && u !== AEVUM_RPC);
+
 /** Block explorer base URL for tx and address links. NEXT_PUBLIC_EXPLORER_URL. */
 export const EXPLORER_URL = process.env.NEXT_PUBLIC_EXPLORER_URL || "https://explorer-test.qday.info";
 

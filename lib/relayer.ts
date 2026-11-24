@@ -7,7 +7,6 @@
 import {
   createWalletClient,
   formatUnits,
-  http,
   parseEventLogs,
   parseSignature,
   type Address,
@@ -15,10 +14,8 @@ import {
   type TransactionReceipt,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { aevumTestnet, publicClient, quorumPoolAbi, tusd8Abi } from "./aevum";
+import { aevumTestnet, aevumTransport, publicClient, quorumPoolAbi, tusd8Abi } from "./aevum";
 import {
-  AEVUM_RPC,
-  CALL_TIMEOUT_MS,
   POOL_ADDRESS,
   RECEIPT_TIMEOUT_MS,
   RELAYER_KEY_ENV,
@@ -60,7 +57,7 @@ function relayerWallet() {
   return createWalletClient({
     account: privateKeyToAccount(key),
     chain: aevumTestnet,
-    transport: http(AEVUM_RPC, { timeout: CALL_TIMEOUT_MS, retryCount: 0 }),
+    transport: aevumTransport(),
   });
 }
 
