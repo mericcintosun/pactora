@@ -35,14 +35,14 @@ export default async function Home() {
               <span className="mt-2 block w-fit bg-foreground px-2 pb-1 text-background">the batch is real.</span>
             </h1>
             <p className="mt-6 max-w-[62ch] text-lg leading-relaxed">
-              Buyers sign once and keep their money. When enough orders arrive, every payment is collected in a single
-              transaction. If the count falls short by the deadline, nothing ever moved, so there is nothing to refund.
+              Pre-orders for roasters, printers, tailors and other small makers who sell against a minimum order. Buyers only
+              sign, payment is collected in one transaction when enough orders arrive, and nothing moves if they do not.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-4">
               <Button asChild size="lg">
                 <Link href={`/pledge?example=${EXAMPLE_CAMPAIGN_ID}`}>Open Ayşe&apos;s roast batch</Link>
               </Button>
-              <Link href="/how" className="text-sm font-semibold underline decoration-2 underline-offset-4">
+              <Link href="/how" className="inline-flex min-h-11 items-center text-sm font-semibold underline decoration-2 underline-offset-4">
                 Read the contract rules
               </Link>
             </div>

@@ -265,7 +265,7 @@ async function timedGet(url) {
 }
 
 async function proofDemoPath() {
-  const base = (ENV.NEXT_PUBLIC_SITE_URL || "https://pactora.vercel.app").replace(/\/$/, "");
+  const base = (ENV.NEXT_PUBLIC_SITE_URL || "https://pactora-smoky.vercel.app").replace(/\/$/, "");
   const lines = [`- Site \`${base}\`, budget ${DEMO_BUDGET_MS} ms per step`];
   const parts = [];
   for (const path of ["/api/campaigns", "/api/campaigns/kavruk-guji"]) {
