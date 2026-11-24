@@ -1,6 +1,6 @@
 # Pactora
 
-Pre-orders for small makers. Buyers only sign. When enough orders arrive, every payment is collected in one transaction; if they don't, nobody's money ever moves.
+Pactora is pre-orders for small makers. Buyers only sign. When enough orders arrive, every payment is collected in one transaction; if they don't, nobody's money ever moves. Built with Next.js 15, Tailwind CSS v4, viem 2 and a Foundry-tested Solidity contract on Aevum testnet with tUSD8.
 
 > Live demo: https://pactora.vercel.app
 
@@ -42,7 +42,9 @@ flowchart LR
 | Piece | File | Role |
 | --- | --- | --- |
 | Contract | `contracts/src/QuorumPool.sol` | createPool, pledge (signature check), withdrawPledge, dropPledge, settle |
-| Chain adapter | `lib/aevum.ts` | Aevum chain config, ABIs, EIP-712 typed data, `loadCampaign` (multicall read, falls back to seed), `getLogsChunked` |
+| Data adapter | `lib/adapter/` | `getAdapter()`: fake (seed data, default) or real (`ADAPTER_MODE=real`); pages and `/api/campaigns` read through it |
+| Seed data | `lib/data/seed.ts` | Eleven fixed maker batches, deterministic placeholder hashes |
+| Chain module | `lib/aevum.ts` | Aevum chain config, ABIs, EIP-712 typed data, `loadCampaign` (multicall read, falls back to seed), `getLogsChunked` |
 | Relayer | `app/api/relay/route.ts` | Gasless pledge, cancel and settle. Legacy transactions, rate limited, mock hash when unconfigured |
 | Workspace | `app/pledge/page.tsx` | Sellers open a batch; the board of all batches |
 | Result page | `app/pledge/[id]/page.tsx` | Live counter, signer list, sign / withdraw / collect, on-chain trail, copy link |
@@ -75,14 +77,18 @@ flowchart LR
 
 Next.js 15 (App Router), TypeScript, Tailwind CSS v4, shadcn-style primitives, viem 2, AutoAnimate and Motion for list and counter transitions, Solidity 0.8.24 with Foundry, Aevum testnet, tUSD8, Vercel.
 
+The 90-second demo path is in [DEMO.md](DEMO.md).
+
 ## Quickstart
 
 ```bash
 npm install
 npm run dev          # http://localhost:3000, practice mode on seed data
+npm run seed         # prints the seed count and its sha256 (Node 22.6+)
+cd contracts && forge build && forge test
 ```
 
-Practice mode needs no keys: the counter, sign, withdraw and collect flows run against ten seeded batches and the relayer returns placeholder hashes.
+Practice mode needs no keys: the counter, sign, withdraw and collect flows run against eleven seeded batches and the relayer returns placeholder hashes.
 
 Going live on Aevum:
 
@@ -95,6 +101,7 @@ PRIVATE_KEY=0x... forge script script/Deploy.s.sol --rpc-url https://rpc-test.qd
 
 | Variable | Where it comes from |
 | --- | --- |
+| `ADAPTER_MODE` | `fake` (seed data, default) or `real` |
 | `NEXT_PUBLIC_CONTRACT_ADDRESS` | Output of `Deploy.s.sol` |
 | `NEXT_PUBLIC_CHAIN_ID` | `44005` |
 | `NEXT_PUBLIC_AEVUM_RPC` | `https://rpc-test.qday.info` |
