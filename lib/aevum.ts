@@ -1,6 +1,7 @@
-// Aevum testnet + tUSD8 integration. One module, two paths:
-//   live: NEXT_PUBLIC_CONTRACT_ADDRESS is set, reads come from QuorumPool on chain 44005
-//   mock: no address, the same functions return the seed campaigns from lib/data/seed.ts
+// Aevum testnet + tUSD8 integration: chain definition, ABIs, EIP-712 builders and
+// live reads. Imported by client components, so it never touches a secret: every
+// constant comes from lib/config.ts (NEXT_PUBLIC_ values only).
+//
 // Pages never call loadCampaign / listCampaigns directly: they go through
 // getAdapter() in lib/adapter, and only the real adapter delegates here.
 import {
@@ -10,22 +11,39 @@ import {
   formatUnits,
   http,
   keccak256,
+  parseEventLogs,
   type Address,
+  type ContractFunctionParameters,
   type Hex,
 } from "viem";
 import { campaigns, getSeedCampaign } from "@/lib/data/seed";
-import type { Campaign } from "@/lib/types";
+import type { Campaign, Pledge, PledgeState } from "@/lib/types";
+import {
+  AEVUM_CHAIN_ID,
+  AEVUM_RPC,
+  CALL_TIMEOUT_MS,
+  EXPLORER_URL,
+  LIVE_POOLS_ON_BOARD,
+  LOG_LOOKBACK_BLOCKS,
+  MULTICALL3,
+  POOL_ADDRESS,
+  TUSD8_ADDRESS,
+  TUSD8_DECIMALS,
+} from "./config";
+import { withTimeoutAndRetry } from "./http";
+import { shortHex } from "./format";
 
-export const AEVUM_CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 44005);
-export const AEVUM_RPC = process.env.NEXT_PUBLIC_AEVUM_RPC ?? "https://rpc-test.qday.info";
-export const EXPLORER_URL = process.env.NEXT_PUBLIC_EXPLORER_URL ?? "https://explorer-test.qday.info";
-export const TUSD8_ADDRESS = (process.env.NEXT_PUBLIC_TUSD8_ADDRESS ??
-  "0x456569838f1d43009A91ebA4263147Afd7233483") as Address;
-export const TUSD8_DECIMALS = Number(process.env.NEXT_PUBLIC_TUSD8_DECIMALS ?? 6);
-export const POOL_ADDRESS = (process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || undefined) as Address | undefined;
-export const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11" as Address;
-
-export const isLive = Boolean(POOL_ADDRESS);
+export {
+  AEVUM_CHAIN_ID,
+  AEVUM_RPC,
+  CALL_RETRIES,
+  CALL_TIMEOUT_MS,
+  EXPLORER_URL,
+  MULTICALL3,
+  POOL_ADDRESS,
+  TUSD8_ADDRESS,
+  TUSD8_DECIMALS,
+} from "./config";
 
 export const aevumTestnet = defineChain({
   id: AEVUM_CHAIN_ID,
@@ -36,7 +54,11 @@ export const aevumTestnet = defineChain({
   contracts: { multicall3: { address: MULTICALL3 } },
 });
 
-export const publicClient = createPublicClient({ chain: aevumTestnet, transport: http(AEVUM_RPC) });
+// viem's own retries are off: withTimeoutAndRetry owns the single retry.
+export const publicClient = createPublicClient({
+  chain: aevumTestnet,
+  transport: http(AEVUM_RPC, { timeout: CALL_TIMEOUT_MS, retryCount: 0 }),
+});
 
 export const quorumPoolAbi = [
   {
@@ -48,6 +70,7 @@ export const quorumPoolAbi = [
       { name: "settled", type: "bool" }, { name: "price", type: "uint256" }, { name: "title", type: "string" },
     ],
   },
+  { type: "function", name: "poolCount", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
   { type: "function", name: "activeCount", stateMutability: "view", inputs: [{ name: "", type: "uint256" }], outputs: [{ type: "uint256" }] },
   { type: "function", name: "entrantsOf", stateMutability: "view", inputs: [{ name: "poolId", type: "uint256" }], outputs: [{ type: "address[]" }] },
   { type: "function", name: "isPledged", stateMutability: "view", inputs: [{ name: "poolId", type: "uint256" }, { name: "buyer", type: "address" }], outputs: [{ type: "bool" }] },
@@ -69,7 +92,55 @@ export const quorumPoolAbi = [
     outputs: [],
   },
   { type: "function", name: "withdrawPledge", stateMutability: "nonpayable", inputs: [{ name: "poolId", type: "uint256" }, { name: "buyer", type: "address" }], outputs: [] },
+  { type: "function", name: "dropPledge", stateMutability: "nonpayable", inputs: [{ name: "poolId", type: "uint256" }, { name: "buyer", type: "address" }], outputs: [] },
   { type: "function", name: "settle", stateMutability: "nonpayable", inputs: [{ name: "poolId", type: "uint256" }], outputs: [] },
+  {
+    type: "event", name: "PoolCreated",
+    inputs: [
+      { name: "poolId", type: "uint256", indexed: true }, { name: "seller", type: "address", indexed: true },
+      { name: "price", type: "uint256", indexed: false }, { name: "minOrders", type: "uint32", indexed: false },
+      { name: "deadline", type: "uint64", indexed: false }, { name: "title", type: "string", indexed: false },
+    ],
+  },
+  {
+    type: "event", name: "Pledged",
+    inputs: [
+      { name: "poolId", type: "uint256", indexed: true }, { name: "buyer", type: "address", indexed: true },
+      { name: "nonce", type: "bytes32", indexed: false }, { name: "activeCount", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event", name: "PledgeWithdrawn",
+    inputs: [
+      { name: "poolId", type: "uint256", indexed: true }, { name: "buyer", type: "address", indexed: true },
+      { name: "activeCount", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event", name: "PledgeDropped",
+    inputs: [
+      { name: "poolId", type: "uint256", indexed: true }, { name: "buyer", type: "address", indexed: true },
+      { name: "activeCount", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event", name: "Settled",
+    inputs: [
+      { name: "poolId", type: "uint256", indexed: true }, { name: "seller", type: "address", indexed: true },
+      { name: "orders", type: "uint256", indexed: false }, { name: "total", type: "uint256", indexed: false },
+    ],
+  },
+  { type: "error", name: "UnknownPool", inputs: [] },
+  { type: "error", name: "PoolClosed", inputs: [] },
+  { type: "error", name: "BadParams", inputs: [] },
+  { type: "error", name: "AlreadyPledged", inputs: [] },
+  { type: "error", name: "NotPledged", inputs: [] },
+  { type: "error", name: "PoolFull", inputs: [] },
+  { type: "error", name: "BadSignature", inputs: [] },
+  { type: "error", name: "NonceUsed", inputs: [] },
+  { type: "error", name: "NotAllowed", inputs: [] },
+  { type: "error", name: "BelowThreshold", inputs: [] },
+  { type: "error", name: "TransferFailed", inputs: [] },
 ] as const;
 
 export const tusd8Abi = [
@@ -81,10 +152,22 @@ export const tusd8Abi = [
     ],
     outputs: [],
   },
+  {
+    type: "function", name: "authorizationState", stateMutability: "view",
+    inputs: [{ name: "authorizer", type: "address" }, { name: "nonce", type: "bytes32" }],
+    outputs: [{ type: "bool" }],
+  },
   { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ name: "a", type: "address" }], outputs: [{ type: "uint256" }] },
+  {
+    type: "event", name: "Transfer",
+    inputs: [
+      { name: "from", type: "address", indexed: true }, { name: "to", type: "address", indexed: true },
+      { name: "value", type: "uint256", indexed: false },
+    ],
+  },
 ] as const;
 
-/** EIP-712 domain of tUSD8 (name "tUSD8", version "2" per the starter kit). */
+/** EIP-712 domain of tUSD8 (name "tUSD8", version "2" per the starter kit; `npm run proof` checks it). */
 export const tusd8Domain = {
   name: "tUSD8",
   version: "2",
@@ -151,6 +234,119 @@ export async function getLogsChunked<T>(
   return out;
 }
 
+// ------------------------------------------------------------------ live reads
+
+const ZERO = "0x0000000000000000000000000000000000000000";
+
+type History = {
+  createTx?: Hex;
+  settleTx?: Hex;
+  createdBlock?: bigint;
+  /** lowercase buyer address -> block of their latest Pledged log */
+  pledgedAt: Map<string, bigint>;
+  blockTimes: Map<bigint, string>;
+};
+
+/** Read this pool's events from the last LOG_LOOKBACK_BLOCKS blocks, 1,000 at a time. */
+async function readHistory(poolId: bigint): Promise<History> {
+  const history: History = { pledgedAt: new Map(), blockTimes: new Map() };
+  const latest = await withTimeoutAndRetry(() => publicClient.getBlockNumber());
+  const from = latest > LOG_LOOKBACK_BLOCKS ? latest - LOG_LOOKBACK_BLOCKS : BigInt(0);
+  const raw = await getLogsChunked(from, latest, (f, t) =>
+    withTimeoutAndRetry(() => publicClient.getLogs({ address: POOL_ADDRESS!, fromBlock: f, toBlock: t })),
+  );
+  const logs = parseEventLogs({ abi: quorumPoolAbi, logs: raw }).filter((l) => l.args.poolId === poolId);
+  for (const l of logs) {
+    if (l.eventName === "PoolCreated") {
+      history.createTx = l.transactionHash ?? undefined;
+      history.createdBlock = l.blockNumber ?? undefined;
+    } else if (l.eventName === "Settled") {
+      history.settleTx = l.transactionHash ?? undefined;
+    } else if (l.eventName === "Pledged") {
+      const buyer = (l.args as { buyer: Address }).buyer.toLowerCase();
+      if (l.blockNumber !== null) history.pledgedAt.set(buyer, l.blockNumber);
+    }
+  }
+  // Timestamps for the blocks we show, capped so one page view stays cheap.
+  const blocks = [...new Set([history.createdBlock, ...history.pledgedAt.values()].filter((b): b is bigint => b !== undefined))].slice(0, 32);
+  const stamps = await Promise.all(
+    blocks.map((b) => withTimeoutAndRetry(() => publicClient.getBlock({ blockNumber: b })).catch(() => null)),
+  );
+  stamps.forEach((blk, i) => {
+    if (blk) history.blockTimes.set(blocks[i], new Date(Number(blk.timestamp) * 1000).toISOString());
+  });
+  return history;
+}
+
+/**
+ * One live pool. The pool, its count and its entrants come in one multicall; each
+ * entrant's isPledged and tUSD8 balanceOf come in a second one. With `withHistory`
+ * the per-buyer times and the create / settle tx hashes are filled from logs.
+ */
+async function readLivePool(poolId: bigint, withHistory: boolean): Promise<Campaign | null> {
+  const pool = POOL_ADDRESS!;
+  const [info, count, entrants] = await withTimeoutAndRetry(() =>
+    publicClient.multicall({
+      allowFailure: false,
+      contracts: [
+        { address: pool, abi: quorumPoolAbi, functionName: "pools", args: [poolId] },
+        { address: pool, abi: quorumPoolAbi, functionName: "activeCount", args: [poolId] },
+        { address: pool, abi: quorumPoolAbi, functionName: "entrantsOf", args: [poolId] },
+      ],
+    }),
+  );
+  const [seller, deadline, minOrders, maxOrders, settled, price, title] = info;
+  if (seller === ZERO) return null;
+
+  const calls: ContractFunctionParameters[] = entrants.flatMap((a) => [
+    { address: pool, abi: quorumPoolAbi, functionName: "isPledged", args: [poolId, a] },
+    { address: TUSD8_ADDRESS, abi: tusd8Abi, functionName: "balanceOf", args: [a] },
+  ]);
+  const perBuyer = calls.length
+    ? ((await withTimeoutAndRetry(() => publicClient.multicall({ allowFailure: false, contracts: calls }))) as unknown as unknown[])
+    : [];
+
+  const history = withHistory ? await readHistory(poolId).catch(() => null) : null;
+
+  const deadlineIso = new Date(Number(deadline) * 1000).toISOString();
+  const closed = Number(deadline) * 1000 <= Date.now();
+  const createdIso = (history?.createdBlock !== undefined && history.blockTimes.get(history.createdBlock)) || deadlineIso;
+
+  const pledges: Pledge[] = entrants.map((a, i) => {
+    const active = Boolean(perBuyer[i * 2]);
+    const balance = typeof perBuyer[i * 2 + 1] === "bigint" ? (perBuyer[i * 2 + 1] as bigint) : BigInt(0);
+    const state: PledgeState = !active ? "withdrawn" : settled ? "collected" : closed ? "expired" : "signed";
+    const block = history?.pledgedAt.get(a.toLowerCase());
+    return {
+      buyer: shortHex(a),
+      address: a,
+      signedAt: (block !== undefined && history?.blockTimes.get(block)) || createdIso,
+      state,
+      balance: Number(formatUnits(balance, TUSD8_DECIMALS)),
+    };
+  });
+
+  return {
+    id: String(poolId),
+    poolId: Number(poolId),
+    maker: `Seller ${shortHex(seller)}`,
+    makerPerson: seller,
+    city: "Aevum testnet",
+    product: title,
+    blurb: `${count} of ${minOrders} orders signed on chain.`,
+    pricePerOrder: Number(formatUnits(price, TUSD8_DECIMALS)),
+    minOrders,
+    maxOrders,
+    createdAt: createdIso,
+    deadline: deadlineIso,
+    status: settled ? "settled" : closed ? "lapsed" : "open",
+    seller,
+    createTx: history?.createTx ?? "0x",
+    settleTx: history?.settleTx,
+    pledges,
+  };
+}
+
 /**
  * Load a campaign by its page id. Seed slugs always resolve from lib/data/seed.ts.
  * Numeric ids resolve from QuorumPool when the contract address is configured.
@@ -158,53 +354,26 @@ export async function getLogsChunked<T>(
 export async function loadCampaign(id: string): Promise<Campaign | null> {
   const seed = getSeedCampaign(id);
   if (seed) return seed;
-  if (!isLive || !/^\d+$/.test(id)) return null;
-
-  // Live path: read the pool and its entrants from Aevum in one multicall.
-  const poolId = BigInt(id);
+  if (!POOL_ADDRESS || !/^\d{1,10}$/.test(id)) return null;
   try {
-    const [pool, count, entrants] = await publicClient.multicall({
-      allowFailure: false,
-      contracts: [
-        { address: POOL_ADDRESS!, abi: quorumPoolAbi, functionName: "pools", args: [poolId] },
-        { address: POOL_ADDRESS!, abi: quorumPoolAbi, functionName: "activeCount", args: [poolId] },
-        { address: POOL_ADDRESS!, abi: quorumPoolAbi, functionName: "entrantsOf", args: [poolId] },
-      ],
-    });
-    const [seller, deadline, minOrders, maxOrders, settled, price, title] = pool;
-    if (seller === "0x0000000000000000000000000000000000000000") return null;
-    const deadlineIso = new Date(Number(deadline) * 1000).toISOString();
-    const closed = Number(deadline) * 1000 < Date.now();
-    return {
-      id,
-      poolId: Number(poolId),
-      maker: `Seller ${seller.slice(0, 6)}`,
-      makerPerson: seller,
-      city: "Aevum testnet",
-      product: title,
-      blurb: `${count} of ${minOrders} orders signed on chain.`,
-      pricePerOrder: Number(formatUnits(price, TUSD8_DECIMALS)),
-      minOrders,
-      maxOrders,
-      createdAt: deadlineIso,
-      deadline: deadlineIso,
-      status: settled ? "settled" : closed ? "lapsed" : "open",
-      seller,
-      createTx: "0x",
-      // TODO: fill per-buyer state from isPledged + Pledged logs via getLogsChunked
-      pledges: entrants.map((a) => ({
-        buyer: `${a.slice(0, 6)}…${a.slice(-4)}`,
-        address: a,
-        signedAt: deadlineIso,
-        state: settled ? "collected" : "signed",
-        balance: 0,
-      })),
-    };
+    return await readLivePool(BigInt(id), true);
   } catch {
     return null;
   }
 }
 
-export function listCampaigns(): Campaign[] {
-  return campaigns;
+/** The newest live pools (no log history, to keep the board cheap) followed by the seed batches. */
+export async function listCampaigns(): Promise<Campaign[]> {
+  if (!POOL_ADDRESS) return campaigns;
+  try {
+    const total = await withTimeoutAndRetry(() =>
+      publicClient.readContract({ address: POOL_ADDRESS!, abi: quorumPoolAbi, functionName: "poolCount" }),
+    );
+    const ids: bigint[] = [];
+    for (let i = total; i >= BigInt(1) && ids.length < LIVE_POOLS_ON_BOARD; i -= BigInt(1)) ids.push(i);
+    const live = await Promise.all(ids.map((i) => readLivePool(i, false).catch(() => null)));
+    return [...live.filter((c): c is Campaign => c !== null), ...campaigns];
+  } catch {
+    return campaigns;
+  }
 }

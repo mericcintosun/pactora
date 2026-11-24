@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "seed": "node --experimental-strip-types scripts/seed.mjs"
+    "seed": "node --experimental-strip-types scripts/seed.mjs",
+    "proof": "node scripts/proof.mjs",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:contracts": "cd contracts && forge test"
   },
   "dependencies": {
     "@formkit/auto-animate": "^0.11.0",
@@ -19,7 +22,8 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "tailwind-merge": "^3.0.1",
-    "viem": "^2.31.0"
+    "viem": "^2.31.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.11",

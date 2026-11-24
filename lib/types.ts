@@ -1,5 +1,6 @@
 // Shared domain types for Pactora. Pure types only, so any module (including the
 // Node seed script, which strips types) can import them with `import type`.
+import type { ErrorCode } from "./errors";
 
 export type CampaignStatus = "open" | "settled" | "lapsed";
 export type PledgeState = "signed" | "withdrawn" | "collected" | "expired";
@@ -36,4 +37,21 @@ export interface Campaign {
 /** Shape of every JSON answer from the app's own API routes. */
 export type ApiResponse<T> =
   | { ok: true; data: T; mode: "fake" | "real" }
-  | { ok: false; error: string };
+  | { ok: false; error: ErrorCode; hint: string };
+
+/** One tUSD8 Transfer decoded from a settle receipt. Values in whole tUSD8. */
+export interface SettleTransfer {
+  from: `0x${string}`;
+  to: `0x${string}`;
+  amount: number;
+}
+
+/** What POST /api/relay answers on success. */
+export interface RelayOk {
+  mode: "live" | "mock";
+  txHash: `0x${string}`;
+  /** settle only: every tUSD8 Transfer in the settle receipt */
+  transfers?: SettleTransfer[];
+  /** settle only: the total forwarded to the seller, in whole tUSD8 */
+  sellerTotal?: number;
+}
