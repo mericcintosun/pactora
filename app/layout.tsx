@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { Libre_Caslon_Text, Libre_Franklin } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
 import { AEVUM_CHAIN_ID, EXPLORER_URL, POOL_ADDRESS } from "@/lib/config";
@@ -24,6 +23,7 @@ const DESCRIPTION =
   "Pre-orders for small makers: buyers only sign, payment is collected in one transaction when enough orders arrive, and nothing moves if not.";
 
 const REPO_URL = "https://github.com/mericcintosun/pactora";
+const HACKATHON_URL = "https://dorahacks.io/hackathon/qday";
 
 export const metadata: Metadata = {
   title: { default: TITLE, template: "%s | Pactora" },
@@ -41,22 +41,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen antialiased">
         <SiteHeader />
         <main>{children}</main>
+        {/* One footer: one sentence, then contract, network and the repo, hackathon and SECURITY.md links. */}
         <footer className="mt-24 border-t-2 border-foreground">
-          <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-8 text-sm sm:flex-row sm:items-center sm:justify-between">
-            <p className="max-w-[65ch]">
-              Pactora runs on Aevum testnet with test tUSD8 only. Built for the Aevum Builder Challenge #1.
-            </p>
-            <div className="flex flex-wrap gap-x-5 font-semibold">
-              <Link href="/pledge" className="inline-flex min-h-11 items-center underline-offset-4 hover:underline">Campaigns</Link>
-              <Link href="/how" className="inline-flex min-h-11 items-center underline-offset-4 hover:underline">Contract and method</Link>
-            </div>
-          </div>
-          <section aria-labelledby="footer-security" className="border-t-2 border-foreground">
-            <div className="mx-auto grid max-w-6xl grid-cols-1 gap-4 px-4 py-6 text-sm md:grid-cols-12">
-              <h2 id="footer-security" className="text-lg font-bold md:col-span-3">
-                About and security
-              </h2>
-              <dl className="grid grid-cols-1 gap-2 md:col-span-9">
+          <section aria-labelledby="footer-security">
+            <div className="mx-auto grid max-w-6xl grid-cols-1 gap-6 px-4 py-10 text-sm md:grid-cols-12">
+              <div className="space-y-2 md:col-span-4">
+                <h2 id="footer-security" className="text-lg font-bold">
+                  About and security
+                </h2>
+                <p className="max-w-[60ch] leading-relaxed">
+                  Pactora runs on Aevum testnet with test tUSD8 only, built for the Aevum Builder Challenge #1.
+                </p>
+              </div>
+              <dl className="grid grid-cols-1 gap-3 md:col-span-8">
                 <div>
                   <dt className="text-xs font-semibold uppercase tracking-widest">Contract</dt>
                   <dd className="break-all">
@@ -92,6 +89,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                       className="inline-flex min-h-11 items-center underline underline-offset-2"
                     >
                       SECURITY.md: wallet permissions and limits
+                    </a>
+                    <a href={HACKATHON_URL} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center underline underline-offset-2">
+                      Aevum Builder Challenge #1 on DoraHacks
                     </a>
                   </dd>
                 </div>

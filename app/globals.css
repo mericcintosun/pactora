@@ -83,17 +83,23 @@ h2 {
   background-size: calc(100% / 12) 100%;
 }
 
-/* L7 diagonal: the black block behind the live product. Mobile stacks with a shallow slant. */
+/* L7 split. From lg up one clipped black block runs behind the board on the right half.
+   Below lg the halves stack: the board sits in its own black block with a slanted top edge. */
 .pactora-diagonal {
-  clip-path: polygon(0 62%, 100% 54%, 100% 100%, 0 100%);
+  clip-path: polygon(60% 0, 100% 0, 100% 100%, 38% 100%);
+  animation: pactora-diagonal-in 380ms ease-out both;
+}
+.pactora-slant {
+  clip-path: polygon(0 2.5rem, 100% 0, 100% 100%, 0 100%);
 }
 @media (min-width: 1024px) {
-  .pactora-diagonal {
-    clip-path: polygon(60% 0, 100% 0, 100% 100%, 38% 100%);
+  .pactora-slant {
+    clip-path: none;
   }
 }
 
-/* M3 scale entrance: scale(0.96) to 1 plus fade, ease-out, 380ms. */
+/* M3 scale entrance: scale(0.96) to 1 plus fade, ease-out, 380ms. The content is in the
+   server HTML; CSS alone runs this, so it plays with JavaScript off too. */
 @keyframes pactora-scale-in {
   from {
     opacity: 0;
@@ -102,6 +108,16 @@ h2 {
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+/* The diagonal settles from a slightly steeper angle, same timing as the entrance. */
+@keyframes pactora-diagonal-in {
+  from {
+    clip-path: polygon(64% 0, 100% 0, 100% 100%, 42% 100%);
+  }
+  to {
+    clip-path: polygon(60% 0, 100% 0, 100% 100%, 38% 100%);
   }
 }
 
@@ -117,7 +133,8 @@ h2 {
 
 @media (prefers-reduced-motion: reduce) {
   .pactora-enter,
-  .pactora-stagger > * {
+  .pactora-stagger > *,
+  .pactora-diagonal {
     animation: none;
   }
 }

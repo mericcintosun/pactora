@@ -83,3 +83,5 @@ Rules:
 - every interaction is driven by the real seed data; a decorative animation with no product meaning does not count as a signature
 
 ## Amendments (append-only; later phases add dated lines here, never edit anything above)
+
+- 2026-11-24 (phase 5): `app/globals.css` adds a second keyframe, `pactora-diagonal-in`, that eases the L7 clip-path from a slightly steeper angle on load with the M3 timing (380ms ease-out). The same `prefers-reduced-motion: reduce` block switches it off. The entrance itself is still only `pactora-scale-in`.
