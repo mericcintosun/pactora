@@ -420,3 +420,103 @@ Runner: `npm install`, `npm run build`, `npm test`, `cd contracts && forge build
 ### Next best step
 
 Phase 5, the frontend pass: kit signature 2 (board row morphs into the campaign room header through `motion` `layoutId`, wrapped in `LayoutGroup`), then the visual redesign pass. Before that, the human runs forge test and the redeploy above.
+
+## 10. Phase 5: frontend pass, pressroom scene and submission package
+
+### Goal
+
+DEMO.md step 1 reads as a funded product within 10 seconds: the first screen shows the headline, one red CTA and the live board with the wow pair on top (Ayşe's `kavruk-guji` at 3 of 5 and the lapsed `kavruk-peru-lapsed` at 3 of 5, "Nobody was charged, every balance change is 0"). All three K7 interactions exist, five scene slots render, and README.md plus SUBMISSION.md are the submission text.
+
+### Status
+
+All slices written (A structure, B1 scenes, B2 motion, C docs). Nothing was built or run. The contract still needs the redeploy at the top of this file.
+
+### Decisions
+
+- **L7 layout** (`app/page.tsx`): from lg up the clip-path black block (`.pactora-diagonal`, `hidden lg:block`) sits behind the board, which now starts level with the headline (the old `lg:pt-24` pushed it down). Below lg the halves stack: headline, then the board in its own black block with a slanted top edge (`.pactora-slant`, a clip-path), then scene-1. The left column is `contents lg:block` so its two children can be ordered around the board on phones without rendering the scene twice.
+- **Wow pair first:** `CampaignBoard` takes `pinned`; the home page pins `EXAMPLE_CAMPAIGN_ID` and `LAPSED_EXAMPLE_ID`. Pins apply only to "Board order"; any other sort key sorts all rows. The compact board now starts on "All" so the lapsed batch is visible.
+- **Sort on both boards:** the sort row is on the home board too (signature 3 is on the first screen), as a 2 by 2 grid on phones.
+- **View morph inside `/pledge`** (signature 2): a literal cross-page morph from `/` to `/pledge/[id]` is not reliable with the App Router, because the old page unmounts in the route transition. So the morph lives in the batch desk, where board and room preview share one client tree: "Preview room" on a row morphs the row's title block (`motion.div layoutId={`campaign-${c.id}`}`, `components/campaign-board.tsx`) into the room header preview (`components/batch-workspace.tsx`, same layoutId, inside `LayoutGroup`). The preview shows maker, product, `signed/min` and "Open the room" to `/pledge/[id]`. `CampaignRoom` carries the same layoutId on its counter card (`components/campaign-room.tsx`); whether Motion carries the element across the route change is unverified, and nothing depends on it.
+- **No double animation:** board rows set `layoutDependency={previewId ?? "none"}`, so Motion only measures when the preview changes and AutoAnimate alone animates sorts and filters.
+- **Reduced motion:** `MotionConfig reducedMotion="user"` wraps the board, the batch desk preview and the room. The CSS block switches off `pactora-scale-in` and `pactora-diagonal-in`. Every control is a Button, so each interaction has a keyboard path.
+- **Counter SSR:** the room counter no longer server-renders at opacity 0.4. It animates only once the count differs from the server count (`firstCount` in `components/campaign-room.tsx`).
+- **Deadline as text:** "Closes Dec 6" is plain uppercase text, not an outlined stamp, so "+ Sign" is the only ruled control in a row. State stamps (Ready, Collected, Lapsed) stay Badges.
+- **Footer:** one footer (`app/layout.tsx`): one sentence, contract, network, repo, SECURITY.md and the DoraHacks hackathon page. The duplicate "Campaigns / Contract and method" band is gone.
+- **Mode line** moved from the page bottom to directly under the home board.
+- **/how:** the monospace `pre` block became a ruled definition table (`SIGNED_FIELDS`), and a "Two steps, one transaction" section holds scene-2 (sign) and scene-3 (settle).
+- **Red budget:** scene-1's red drum light is now ink, so the CTA is the only red on the first screen (the brand mark's slash is the logo and is unchanged). Scene-2 has no red because it sits beside scene-3's red arrow on `/how`.
+- **Seed sources for the kit numbers:** `lib/data/seed.ts` `campaigns` (pledge counts through `activePledges`, `minOrders`, `deadline`, `pricePerOrder`, per-buyer `balance`), `EXAMPLE_CAMPAIGN_ID`, `LAPSED_EXAMPLE_ID`, `getSeedCampaign`. The home lapsed card lists the three real buyers of `kavruk-peru-lapsed` with balance before and after.
+- `IDENTITY.md`: one dated Amendments line for the second keyframe. The key block is unchanged.
+- `LICENSE` (MIT) added because the README names the licence.
+- **Override of a CLAUDE.md rule:** CLAUDE.md lists `public/illustrations` under "Never touch", but the phase 5 spec assigns scenes 1 to 5 there. Changes: one rect in scene-1, scene-2 redrawn as "sign" (its old wallet drawing moved to scene-5), scene-4 and scene-5 created. scene-3 is unchanged. `public/brand/` was not touched.
+
+**Interaction to file:**
+
+| Interaction | File | Seed source |
+| --- | --- | --- |
+| 1 auto-animated collection | `components/campaign-board.tsx` (`useAutoAnimate` on the list; filter, sort, "+ Sign") and the signer list in `components/campaign-room.tsx` | `campaigns`, `activePledges` |
+| 2 view morph | `components/campaign-board.tsx` row `layoutId` to `components/batch-workspace.tsx` preview (`LayoutGroup`), also `components/campaign-room.tsx` | `campaigns` (product, maker, minOrders, active count) |
+| 3 inline sort | `components/campaign-board.tsx` `SORTS` / `COMPARE` on `/` and `/pledge`; "Sort by balance change" in `components/campaign-room.tsx` | `minOrders` minus active pledges, `deadline`, `pricePerOrder`, `balance` |
+
+**Scene slots (all SVG fallbacks; upload a PNG to replace):**
+
+- scene-1: SVG fallback, upload `public/brand/scene-1.png` to replace. On `/` (`app/page.tsx`).
+- scene-2: SVG fallback, upload `public/brand/scene-2.png` to replace. On `/how`, step one "sign" (`app/how/page.tsx`).
+- scene-3: SVG fallback, upload `public/brand/scene-3.png` to replace. On `/how`, step two "settle" (`app/how/page.tsx`).
+- scene-4: SVG fallback, upload `public/brand/scene-4.png` to replace. On `/pledge/[id]` for open and collected batches (`app/pledge/[id]/page.tsx`).
+- scene-5: SVG fallback, upload `public/brand/scene-5.png` to replace. On `/pledge/[id]` for lapsed batches, "Nobody's money moved" (`app/pledge/[id]/page.tsx`).
+
+**Live URL mismatch:** `app/layout.tsx` `metadataBase`, `scripts/proof.mjs:268` and `.env.example` all track `https://pactora-smoky.vercel.app`, so README.md and SUBMISSION.md use that URL. Sections 1 and 5 of this file still say `https://pactora.vercel.app` (older text, left as history). Before submitting, confirm which domain the Vercel project serves and that `/__farm.txt` loads there.
+
+### Failed attempts
+
+None. No error was seen twice, because nothing could be run.
+
+### Files changed
+
+- Created: `SUBMISSION.md`, `LICENSE`, `public/illustrations/scene-4.svg`, `public/illustrations/scene-5.svg`.
+- Edited: `app/globals.css`, `app/layout.tsx`, `app/page.tsx`, `app/loading.tsx`, `app/pledge/page.tsx` (subtitle), `app/pledge/[id]/page.tsx`, `app/how/page.tsx`, `components/campaign-board.tsx`, `components/campaign-room.tsx`, `components/batch-workspace.tsx`, `public/illustrations/scene-1.svg` (one rect), `public/illustrations/scene-2.svg` (redrawn), `README.md`, `IDENTITY.md` (Amendments only), `HANDOFF.md`.
+- Not touched: `public/__farm.txt`, `.farm-scaffold.json`, `contracts/`, `app/api/relay/route.ts`, `lib/relayer.ts`, `lib/wallet-state.ts`, `lib/adapter/*`, `public/brand/`, `components/pool-address.tsx`, `next.config.ts`, `components/site-header.tsx`, `components/ui/*`, `.env.example`, `.gitignore` (it already covers `.env*` with `!.env.example`), `scripts/proof.mjs` (no new measured number).
+- Still present: `lib/data.ts` (empty `export {};`). Runner or human: `git rm lib/data.ts`.
+
+### Commands run
+
+None. No shell commands were used to build, test or run anything. At the start one read-only Bash call printed `.gitignore` and `contracts/foundry.toml` and listed the repo root. Every check below is a Read, Glob or Grep result.
+
+Runner: `npm install`, `npm run build`, `npm test`. Highest-risk compile spots: (1) `layoutDependency` and `layoutId` on `motion.div` / `motion.section` in the board, desk and room; (2) `getSeedCampaign` import in `app/page.tsx`; (3) the `MotionConfig` wrapper closing tags in `components/campaign-room.tsx` (the JSX inside keeps its old indentation).
+
+### Unmet or partial spec items
+
+- Cross-page morph from `/` to `/pledge/[id]` is not guaranteed. The morph is done inside `/pledge` (`components/batch-workspace.tsx`, the `motion.section` with `layoutId`), as the spec allows.
+- Route-change diagonal wipe: cut (cut list item 1).
+- scene-5 inside `EmptyState`: cut (cut list item 2); scene-5 sits in the lapsed result view instead (`app/pledge/[id]/page.tsx`).
+- Slot sizes follow the SVGs' real aspect, not the spec's examples: scene-1 is 960x640 (spec example 960x540) and scene-3 is 800x600 (spec example 960x420). `app/page.tsx` and `app/how/page.tsx`.
+- `pactora-scale-in` fades from opacity 0 (`app/globals.css`, `@keyframes pactora-scale-in`). It is CSS only, so it plays with JavaScript off and nothing waits for hydration. If a reviewer reads "never opacity 0" literally, the shortest fix is `from { opacity: 0.4; ... }`.
+- "One keyframe block, M3 only": `pactora-diagonal-in` is a second keyframe that the B1 slice asked for. It is recorded in the IDENTITY Amendments. If the gate is strict, delete the keyframe and the `animation:` line in `.pactora-diagonal`.
+- The board sort has four buttons ("Board order" plus three keys), unchanged from phase 4 (`components/campaign-board.tsx` `SORTS`).
+- The OG image was not changed (cut list item 4).
+- The Mermaid edges in README.md still hold ` -- `, the known exception.
+- README.md QuorumPool row and SECURITY.md section 1 wait for the redeploy.
+- Not verified without a browser: no horizontal scroll at 360, 768 and 1280 px; the `contents` ordering on phones; the morph timing; Lighthouse.
+
+### Open questions
+
+- No new dependency, no schema change, no new route, no new env key.
+- Should the home board drop the pins once the live pool exists, so the demo pool leads? The conservative choice stays: the seed demo pair is pinned.
+
+### Next best step
+
+Phase 6, the judge round: run the build, look at `/`, `/pledge`, `/pledge/kavruk-guji`, `/pledge/kavruk-peru-lapsed` and `/how` at 360, 768 and 1280 px, then do the redeploy below.
+
+### Manual submit checklist (human)
+
+1. Redeploy QuorumPool: `cd contracts && forge test`, then the Kontrat deploy step.
+2. Run `contracts/script/Smoke.s.sol` with `DEPLOYED_CONTRACT` set to the new address.
+3. Fill the address in the README "Deployed addresses" table and in SECURITY.md section 1.
+4. Set `NEXT_PUBLIC_CONTRACT_ADDRESS` (and `RELAYER_PRIVATE_KEY`, `ADAPTER_MODE=real` if going live) on Vercel and redeploy.
+5. Fund the deployer, relayer and five demo wallets from https://faucet.qday.info/en or Discord `/faucet` (once per address per 24 h).
+6. `git rm lib/data.ts`.
+7. Record the demo video and paste its link into the DoraHacks form only.
+8. Fill the DoraHacks form from SUBMISSION.md. Fields only a person can fill: the video link, team member names, eligibility and rules confirmation, contact details.
+9. Cold-window stranger test: a private window at phone width, open the live URL, follow "Try it in 60 seconds" in README.md, check that the live, repo and explorer links resolve.
+10. Verify that `/__farm.txt` loads on the live URL.
