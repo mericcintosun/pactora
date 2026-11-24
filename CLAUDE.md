@@ -3,7 +3,7 @@
 Pactora: pre-orders for small makers on Aevum testnet with tUSD8. Read these first:
 
 - `IDENTITY.md` is law for every color, font, route, layout and animation. Append to its Amendments only.
-- `DEMO.md` is the demo contract: 6 steps, each tied to a route file. Keep every step working.
+- `DEMO.md` is the demo contract: 7 steps, each tied to a route file. Keep every step working.
 - `HANDOFF.md` holds current state, decisions, mocks and the next step.
 
 ## Commands

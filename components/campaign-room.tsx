@@ -6,6 +6,7 @@ import { useAutoAnimate } from "@formkit/auto-animate/react";
 import { motion, useReducedMotion } from "motion/react";
 import { parseUnits, type Address, type Hex } from "viem";
 import { EmptyState } from "@/components/empty-state";
+import { PoolAddress } from "@/components/pool-address";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBar, CardContent } from "@/components/ui/card";
@@ -95,6 +96,8 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
     campaign.createTx !== "0x" ? [{ label: "Batch opened", tx: campaign.createTx, mock: !live }] : [],
   );
   const [copied, setCopied] = useState(false);
+  // Kit signature 3 on a lapsed batch: reorder the before/after rows by balance change.
+  const [byChange, setByChange] = useState(false);
   const [receipt, setReceipt] = useState<Receipt | null>(
     campaign.settleTx ? { tx: campaign.settleTx, mock: !live } : null,
   );
@@ -281,6 +284,20 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
   const sellerTotal = receipt?.sellerTotal ?? receiptRows.reduce((n, r) => n + r.amount, 0);
   const quiet = state.kind === "idle" || state.kind === "tx-confirmed";
 
+  // Lapsed compare. `balance` is the buyer's tUSD8 balance read when the batch closed; no
+  // transfer happened, so it is both the before and the after value. The change is computed,
+  // not assumed, and the sort is stable: equal changes (all 0 on the seed) keep their order.
+  const compareRows = pledges.map((p) => ({ p, before: p.balance, after: p.balance, change: p.balance - p.balance }));
+  const shownRows = byChange ? [...compareRows].sort((a, b) => b.change - a.change) : compareRows;
+  const allUnchanged = compareRows.every((r) => r.change === 0);
+
+  // Plain-language lines shown before any wallet popup opens. Amounts come from the campaign.
+  const poolName = POOL_ADDRESS ? `QuorumPool ${shortHex(POOL_ADDRESS)}` : "QuorumPool";
+  const practiceNote = live ? "" : " In practice mode a demo wallet stands in and nothing is signed.";
+  const signLine = `You sign a message allowing ${poolName} to take ${formatTusd(campaign.pricePerOrder)} from you only if ${campaign.minOrders} orders arrive before ${formatUtc(campaign.deadline)}. Nothing leaves your wallet now.${practiceNote}`;
+  const withdrawLine = `Withdraw asks you to sign a cancellation of your ${formatTusd(campaign.pricePerOrder)} authorization, so ${poolName} can never redeem it; no tUSD8 moves and you pay no gas.${practiceNote}`;
+  const collectLine = `Collect asks ${poolName} to redeem all ${count} signatures in one transaction and send ${formatTusd(count * campaign.pricePerOrder)} to ${campaign.maker}; you sign nothing and the relayer pays the gas.`;
+
   return (
     <div className="grid gap-8 lg:grid-cols-12">
       <Card className="lg:col-span-7">
@@ -331,6 +348,14 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
             />
           )}
 
+          {status === "open" && (
+            <ul className="space-y-1.5 border-l-2 border-foreground pl-3 text-sm leading-relaxed" aria-label="What each button does">
+              {canJoin && <li>{signLine}</li>}
+              {iAmIn && <li>{withdrawLine}</li>}
+              <li>{collectLine}</li>
+            </ul>
+          )}
+
           <div className="flex flex-wrap gap-3">
             {status === "open" && canJoin && (
               <Button id="sign" size="lg" onClick={join} disabled={busy || count >= campaign.maxOrders}>
@@ -351,6 +376,7 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
               {copied ? "Link copied" : "Copy link"}
             </Button>
           </div>
+          <PoolAddress />
 
           <div className="min-h-6 text-sm">
             {quiet && status === "open" && (
@@ -377,6 +403,24 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
             <span>{status === "lapsed" ? "Balances, before and after" : "Who signed"}</span>
             <span>{count}</span>
           </CardBar>
+          {status === "lapsed" && pledges.length > 0 && (
+            <div className="space-y-2 border-b-2 border-foreground px-4 py-3">
+              <Button
+                variant={byChange ? "secondary" : "outline"}
+                size="sm"
+                className="h-11 sm:h-8"
+                aria-pressed={byChange}
+                onClick={() => setByChange((v) => !v)}
+              >
+                Sort by balance change
+              </Button>
+              {allUnchanged && (
+                <p className="text-sm font-semibold">
+                  Unchanged for all {compareRows.length} buyers. Every change is 0 tUSD8, so the sort leaves every row in place.
+                </p>
+              )}
+            </div>
+          )}
           <ol ref={listRef} className="divide-y-2 divide-foreground">
             {pledges.length === 0 && (
               <li className="p-4">
@@ -388,29 +432,51 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
                     cta="Count me in"
                   />
                 ) : (
-                  <p className="text-sm">Nobody signed this batch.</p>
+                  <p className="text-sm">
+                    Nobody signed this batch before it closed, so there are no balances to compare. Signed buyers appear here
+                    with their balance before and after.
+                  </p>
                 )}
               </li>
             )}
-            {pledges.map((p) => (
-              <li key={p.address} className="flex items-center justify-between gap-3 overflow-x-auto px-4 py-2.5 text-sm">
-                <span className="min-w-0">
-                  <span className="font-semibold">{p.buyer}</span>{" "}
-                  <a href={explorerAddress(p.address)} target="_blank" rel="noreferrer" className="text-muted-foreground underline-offset-2 hover:underline">
-                    {shortHex(p.address)}
-                  </a>
-                </span>
-                {status === "lapsed" ? (
-                  <span className="whitespace-nowrap">
-                    {formatTusd(p.balance)} → {formatTusd(p.balance)}
-                  </span>
-                ) : p.state === "collected" ? (
-                  <Badge variant="ok">Paid</Badge>
-                ) : (
-                  <Badge variant="outline">Signed</Badge>
-                )}
-              </li>
-            ))}
+            {status === "lapsed"
+              ? shownRows.map(({ p, before, after, change }) => (
+                  <li key={p.address} className="grid grid-cols-1 gap-1 px-4 py-2.5 text-sm md:grid-cols-[1fr_auto] md:items-center md:gap-3">
+                    <span className="min-w-0">
+                      <span className="font-semibold">{p.buyer}</span>{" "}
+                      <a
+                        href={explorerAddress(p.address)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={p.address}
+                        className="break-all text-muted-foreground underline-offset-2 hover:underline"
+                      >
+                        {shortHex(p.address)}
+                      </a>
+                    </span>
+                    <span className="whitespace-nowrap">
+                      {formatTusd(before)} → {formatTusd(after)},{" "}
+                      <strong>{change === 0 ? "unchanged" : `${change > 0 ? "+" : ""}${formatTusd(change)}`}</strong>
+                    </span>
+                  </li>
+                ))
+              : pledges.map((p) => (
+                  <li key={p.address} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+                    <span className="min-w-0 truncate">
+                      <span className="font-semibold">{p.buyer}</span>{" "}
+                      <a
+                        href={explorerAddress(p.address)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={p.address}
+                        className="text-muted-foreground underline-offset-2 hover:underline"
+                      >
+                        {shortHex(p.address)}
+                      </a>
+                    </span>
+                    {p.state === "collected" ? <Badge variant="ok">Paid</Badge> : <Badge variant="outline">Signed</Badge>}
+                  </li>
+                ))}
           </ol>
         </Card>
 
@@ -425,7 +491,7 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
               {receipt.mock ? (
                 <span className="text-muted-foreground">practice {shortHex(receipt.tx)}</span>
               ) : (
-                <a className="font-semibold underline" href={explorerTx(receipt.tx)} target="_blank" rel="noreferrer">
+                <a className="font-semibold underline" href={explorerTx(receipt.tx)} target="_blank" rel="noopener noreferrer" title={receipt.tx}>
                   {shortHex(receipt.tx)}
                 </a>
               )}
@@ -434,7 +500,7 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
               {receiptRows.map((row, i) => (
                 <li key={`receipt-${row.key}`} className="flex items-center justify-between gap-3 overflow-x-auto px-4 py-2">
                   <span className="min-w-0 whitespace-nowrap">
-                    {i + 1}. {row.buyer} <span className="text-muted-foreground">{shortHex(row.address)}</span> to pool
+                    {i + 1}. {row.buyer} <span className="text-muted-foreground" title={row.address}>{shortHex(row.address)}</span> to pool
                   </span>
                   <span className="whitespace-nowrap">{formatTusd(row.amount)}</span>
                 </li>
@@ -450,14 +516,18 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
         <Card>
           <CardBar>On-chain trail</CardBar>
           <ul className="divide-y-2 divide-foreground text-sm">
-            {log.length === 0 && <li className="px-4 py-4">Nothing on chain yet.</li>}
+            {log.length === 0 && (
+              <li className="px-4 py-4">
+                No transactions for this batch yet. Each signature, withdrawal and collect adds a line here with its tx hash.
+              </li>
+            )}
             {log.map((e) => (
               <li key={`${e.tx}-${e.label}`} className="overflow-x-auto px-4 py-2.5">
                 {e.label}{" "}
                 {e.mock ? (
-                  <span className="text-muted-foreground">practice {shortHex(e.tx)}</span>
+                  <span className="text-muted-foreground" title={e.tx}>practice {shortHex(e.tx)}</span>
                 ) : (
-                  <a className="font-semibold underline" href={explorerTx(e.tx)} target="_blank" rel="noreferrer">
+                  <a className="font-semibold underline" href={explorerTx(e.tx)} target="_blank" rel="noopener noreferrer" title={e.tx}>
                     {shortHex(e.tx)}
                   </a>
                 )}

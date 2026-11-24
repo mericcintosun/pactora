@@ -1,4 +1,4 @@
-# Pactora demo (90 seconds)
+# Pactora demo (90 seconds, plus an optional 10 s step 7)
 
 **Problem:** A small maker needs a minimum number of pre-orders before a batch is worth making, and today buyers either pay up front and wait for refunds, or promise in a group chat and vanish at payment time.
 
@@ -20,3 +20,4 @@ Runs fully on seed data with `ADAPTER_MODE=fake` (or unset): no wallet, no RPC, 
 4. **Same page** (`app/pledge/[id]/page.tsx`), 45 to 65 s. Press "Collect all payments" (`settle`). The receipt shows one settle tx, five transfers of 2 tUSD8 into the pool, and the 10 tUSD8 total to the seller.
 5. **`/how`** (`app/how/page.tsx`), 65 to 75 s. The signed message with `to = QuorumPool` (only the pool can redeem it) and the six safety controls.
 6. **`/pledge/kavruk-peru-lapsed`** (`app/pledge/[id]/page.tsx`), 75 to 90 s. The lapsed batch at 3/5: every buyer's balance before and after is identical. Close with the line above.
+7. **`/pledge`** (`app/pledge/page.tsx`), 90 to 100 s optional: press "Closes soonest" and "Price", rows reorder; open /pledge/kavruk-peru-lapsed and press "Sort by balance change", every row stays at 0. The sort control is in `components/campaign-board.tsx`, the balance sort in `components/campaign-room.tsx`; both reorder from real seed values (signatures still needed, deadline, price per order, balance after minus before) and the panel reads "Unchanged for all 3 buyers".
