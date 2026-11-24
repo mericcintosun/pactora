@@ -75,12 +75,27 @@ flowchart LR
 - Instant revocation: gasless `cancelAuthorization` plus `withdrawPledge`.
 - All or nothing: one failed redemption reverts the whole settle.
 - Bounded loops: at most 128 orders per pool (`maxOrders <= MAX_ENTRIES / 2`) and 256 distinct entrants.
+- Reentrancy lock on `settle`, the only function that makes non-view token calls.
+- Measured delta: `settle` reads the pool's tUSD8 balance before and after the redemptions and reverts with `ShortDelivery` if it grew by less than orders x price, before the seller is paid.
+- No approvals: the app never calls `approve` and the pool never calls `transferFrom`. Wallet permissions, signature bounds and the contract address are listed in [SECURITY.md](SECURITY.md).
 
 ## Tech stack
 
 Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS 4, shadcn-style primitives, viem 2, zod 3 for request validation, AutoAnimate and Motion for list and counter transitions, Solidity ^0.8.20 (compiled for the shanghai EVM) with Foundry, Aevum testnet, tUSD8, Vercel.
 
 The 90-second demo path is in [DEMO.md](DEMO.md).
+
+## Bounty table
+
+| Bounty | Prize | Slots | Required tech | Code file | DEMO step |
+| --- | --- | --- | --- | --- | --- |
+| 1st Place | **1st Place**: $800 USDT | 1 | Aevum testnet, tUSD8 | contracts/src/QuorumPool.sol | 4 |
+| 2nd Place | **2nd Place**: $500 USDT | 1 | Aevum testnet, tUSD8 | components/campaign-room.tsx | 3 |
+| 3rd Place | **3rd Place**: $200 USDT | 1 | Aevum testnet, tUSD8 | components/campaign-room.tsx | 6 |
+
+Placements are automatic: one submission is ranked for all three, and this hackathon has no sponsor bounties.
+
+Where the required tech sits: `contracts/src/QuorumPool.sol` talks to tUSD8 only through its `IERC3009Token` interface and calls `receiveWithAuthorization` for every buyer inside `settle`; `lib/aevum.ts` builds the tUSD8 EIP-712 typed data (`receiveAuthTypedData`, `cancelAuthTypedData`, domain `tusd8Domain`) that `components/campaign-room.tsx` asks the wallet to sign. Delivery checklist: [DELIVERY.md](DELIVERY.md).
 
 ## Quickstart
 
@@ -120,7 +135,7 @@ PRIVATE_KEY=0x... forge script script/Deploy.s.sol --rpc-url https://rpc-test.qd
 
 ## Demo path and reset
 
-The six [DEMO.md](DEMO.md) steps, each with the file that carries the real path and the file that takes over when the real path cannot answer. Every read fallback is code: `readCampaignList` / `readCampaign` in `lib/adapter/index.ts` (the `FALLBACK` block) serve `lib/adapter/fake.ts` seed data for that request when the live read times out, passes 4 seconds, or fails with `upstream_error` or `parse_failure`, and the page's mode line then says it shows sample data.
+The seven [DEMO.md](DEMO.md) steps, each with the file that carries the real path and the file that takes over when the real path cannot answer. Every read fallback is code: `readCampaignList` / `readCampaign` in `lib/adapter/index.ts` (the `FALLBACK` block) serve `lib/adapter/fake.ts` seed data for that request when the live read times out, passes 4 seconds, or fails with `upstream_error` or `parse_failure`, and the page's mode line then says it shows sample data.
 
 | Step | Route | Real path | Fallback |
 | --- | --- | --- | --- |
@@ -130,6 +145,19 @@ The six [DEMO.md](DEMO.md) steps, each with the file that carries the real path 
 | 4 | same page | `components/campaign-room.tsx` `collect` to `submitSettle` in `lib/relayer.ts` (`settle`) | Practice settle through the mock branch; a live failure renders `tx-failed` with retry |
 | 5 | `/how` | `app/how/page.tsx` reads `POOL_ADDRESS` from `lib/config.ts` | `EmptyState` when no contract address is configured |
 | 6 | `/pledge/kavruk-peru-lapsed` | `app/pledge/[id]/page.tsx` via `readCampaign` (seed slug, no RPC) | Same seed record from `lib/adapter/fake.ts` |
+| 7 | `/pledge`, then `/pledge/kavruk-peru-lapsed` | Sort control in `components/campaign-board.tsx` (signatures needed, deadline, price) and "Sort by balance change" in `components/campaign-room.tsx`, both client side on the server-read list | Same rows from the `FALLBACK` seed board; the sort needs no RPC |
+
+### Layout and flow as shipped
+
+```mermaid
+flowchart TD
+  H[Header: Campaigns, Live batch, How it works, Open a batch. Below md one Menu button lists all four] --> L
+  L["/ landing: diagonal split, headline left, live board right"] -- "Open Ayşe's roast batch" --> W
+  L -- "Read the contract rules" --> HOW["/how: signed message, six controls, addresses"]
+  W["/pledge batch desk: seller form plus board with filter and sort"] -- "row link" --> R
+  R["/pledge/[id] campaign room: counter, sign, withdraw, collect, receipt, pool address"] -- "lapsed batch" --> C["before and after balances, Sort by balance change, Unchanged for all N buyers"]
+  F[Footer on every page: contract address or practice mode, chain id 44005, repo, SECURITY.md]
+```
 
 `npm run demo:reset` (`scripts/demo-reset.mjs`, Node 22.6+) hashes the seed from two separate module loads and exits 1 if the hashes differ, checks that `kavruk-guji` and `kavruk-peru-lapsed` exist, and states that there is no store: practice state lives in browser memory, so a reload is the reset. With `RELAYER_PRIVATE_KEY` and `NEXT_PUBLIC_CONTRACT_ADDRESS` set it also opens a fresh live pool (min 5, 2 tUSD8, 24 h, relayer as seller) and prints its id and explorer link. Without them it prints a "Not run" line.
 
@@ -138,11 +166,11 @@ Wallet states (`lib/wallet-state.ts`, rendered by `components/wallet-bar.tsx`): 
 Measured by `npm run proof`:
 
 <!-- PROOF:BEGIN demo-path -->
-_Generated by `npm run proof` at 2026-11-24T11:09:03Z._
+_Generated by `npm run proof` at 2026-11-24T11:21:21Z._
 
-- Site `https://pactora.vercel.app`, budget 5000 ms per step
-- `GET /api/campaigns`: HTTP 404, 1765 ms, mode ?, error unknown, within budget
-- `GET /api/campaigns/kavruk-guji`: HTTP 404, 211 ms, mode ?, error unknown, within budget
+- Site `https://pactora-smoky.vercel.app`, budget 5000 ms per step
+- `GET /api/campaigns`: HTTP 200, 1264 ms, mode fake, 11 batches, within budget
+- `GET /api/campaigns/kavruk-guji`: HTTP 200, 199 ms, mode fake, batch kavruk-guji, within budget
 <!-- PROOF:END demo-path -->
 
 ## Known constraints
@@ -169,7 +197,7 @@ _Generated by `npm run proof` at 2026-11-24T11:09:03Z._
 ### tUSD8 capabilities
 
 <!-- PROOF:BEGIN tusd8-capabilities -->
-_Generated by `npm run proof` at 2026-11-24T11:09:03Z._
+_Generated by `npm run proof` at 2026-11-24T11:21:21Z._
 
 - Token `0x456569838f1d43009A91ebA4263147Afd7233483` on chain 44005
 - `name()`: "tUSD8"
@@ -186,24 +214,24 @@ _Generated by `npm run proof` at 2026-11-24T11:09:03Z._
 ### Chain latency
 
 <!-- PROOF:BEGIN chain-latency -->
-_Generated by `npm run proof` at 2026-11-24T11:09:03Z._
+_Generated by `npm run proof` at 2026-11-24T11:21:21Z._
 
 - RPC `https://rpc-test.qday.info`
 - Chain id: 44005
-- Latest block: 3998369
-- Round trip for `eth_chainId`: 205 ms
+- Latest block: 3999096
+- Round trip for `eth_chainId`: 203 ms
 - QuorumPool: NEXT_PUBLIC_CONTRACT_ADDRESS is not set, so the pool was not read.
 <!-- PROOF:END chain-latency -->
 
 ### Contract tests
 
 <!-- PROOF:BEGIN contract-tests -->
-_Generated by `npm run proof` at 2026-11-24T11:09:03Z._
+_Generated by `npm run proof` at 2026-11-24T11:21:21Z._
 
-Not run in this build: forge test exited 1 without a summary line.
+- `forge test` (pass, exit 0): Ran 1 test suite in 403.29ms (398.60ms CPU time): 14 tests passed, 0 failed, 0 skipped (14 total tests)
 <!-- PROOF:END contract-tests -->
 
-The suite (`contracts/test/QuorumPool.t.sol`, run with `npm run test:contracts`) covers the five-buyer settle with its `Settled` event, below-threshold, after-deadline, cancelled authorization, front-run, emptied wallet plus `dropPledge`, seller-only `dropPledge`, bad signature, duplicate pledge, and a fuzz test that settle always pays exactly orders x price.
+The suite (`contracts/test/QuorumPool.t.sol`, run with `npm run test:contracts`) covers the five-buyer settle with its `Settled` event, below-threshold, after-deadline, cancelled authorization, front-run, emptied wallet plus `dropPledge`, seller-only `dropPledge`, bad signature, duplicate pledge, a token that re-enters `settle` (`test_settleReentrancyReverts`), a fee-on-transfer token that delivers less (`test_settleRevertsWhenTokenDeliversLess`), and a fuzz test that settle always pays exactly orders x price.
 
 ## AI use
 
