@@ -2,16 +2,18 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CampaignRoom } from "@/components/campaign-room";
-import { explorerAddress, loadCampaign } from "@/lib/aevum";
-import { campaigns, formatTusd, formatUtc, shortHex } from "@/lib/data";
+import { getAdapter } from "@/lib/adapter";
+import { explorerAddress } from "@/lib/aevum";
+import { formatTusd, formatUtc, shortHex } from "@/lib/format";
 
-export function generateStaticParams() {
+export async function generateStaticParams() {
+  const campaigns = await getAdapter().list();
   return campaigns.map((c) => ({ id: c.id }));
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
-  const c = await loadCampaign(id);
+  const c = await getAdapter().get(id);
   if (!c) return { title: "Batch not found" };
   return {
     title: `${c.product} by ${c.maker}`,
@@ -21,7 +23,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 export default async function CampaignPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const campaign = await loadCampaign(id);
+  const campaign = await getAdapter().get(id);
   if (!campaign) notFound();
 
   return (
@@ -35,7 +37,7 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
         </p>
         <h1 className="mt-3 max-w-4xl text-4xl font-bold leading-tight sm:text-5xl">{campaign.product}</h1>
         {campaign.blurb && <p className="mt-4 max-w-[68ch] text-lg leading-relaxed">{campaign.blurb}</p>}
-        <p className="mt-4 max-w-[68ch] text-sm leading-relaxed text-muted-foreground">
+        <p className="mt-4 max-w-[68ch] overflow-x-auto text-sm leading-relaxed text-muted-foreground">
           Pool #{campaign.poolId}. Payments go to{" "}
           <a className="underline" href={explorerAddress(campaign.seller)} target="_blank" rel="noreferrer">
             {shortHex(campaign.seller)}

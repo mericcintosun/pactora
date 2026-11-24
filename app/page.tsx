@@ -1,11 +1,18 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { CampaignBoard } from "@/components/campaign-board";
 import { SceneSlot } from "@/components/scene-slot";
 import { Button } from "@/components/ui/button";
 import { Card, CardBar, CardContent } from "@/components/ui/card";
-import { campaigns, EXAMPLE_CAMPAIGN_ID } from "@/lib/data";
+import { getAdapter } from "@/lib/adapter";
+import { EXAMPLE_CAMPAIGN_ID } from "@/lib/data/seed";
 
-export default function Home() {
+export const metadata: Metadata = {
+  title: { absolute: "Pactora: pre-orders that only charge when the batch is real" },
+};
+
+export default async function Home() {
+  const campaigns = await getAdapter().list();
   const lapsed = campaigns.filter((c) => c.status === "lapsed");
   const lapsedBuyers = lapsed.reduce((n, c) => n + c.pledges.filter((p) => p.state === "expired").length, 0);
 

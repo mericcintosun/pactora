@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { BatchWorkspace, type BatchDraft } from "@/components/batch-workspace";
-import { listCampaigns } from "@/lib/aevum";
-import { getSeedCampaign } from "@/lib/data";
+import { getAdapter } from "@/lib/adapter";
 
 export const metadata: Metadata = {
   title: "Campaigns",
@@ -12,7 +11,8 @@ const BLANK: BatchDraft = { product: "", maker: "", price: "5", minOrders: "10",
 
 export default async function PledgeWorkspace({ searchParams }: { searchParams: Promise<{ example?: string }> }) {
   const { example } = await searchParams;
-  const seed = example ? getSeedCampaign(example) : undefined;
+  const adapter = getAdapter();
+  const [campaigns, seed] = await Promise.all([adapter.list(), example ? adapter.get(example) : Promise.resolve(null)]);
   const initial: BatchDraft = seed
     ? { product: seed.product, maker: seed.maker, price: String(seed.pricePerOrder), minOrders: String(seed.minOrders), hours: "24" }
     : BLANK;
@@ -28,7 +28,7 @@ export default async function PledgeWorkspace({ searchParams }: { searchParams: 
         </p>
       </div>
       <div className="mt-10">
-        <BatchWorkspace campaigns={listCampaigns()} initial={initial} />
+        <BatchWorkspace campaigns={campaigns} initial={initial} />
       </div>
     </div>
   );
