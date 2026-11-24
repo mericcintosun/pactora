@@ -18,7 +18,7 @@ const franklin = Libre_Franklin({
 });
 
 export const metadata: Metadata = {
-  title: { default: "Pactora: pre-orders that only charge when the batch is real", template: "%s · Pactora" },
+  title: { default: "Pactora: pre-orders that only charge when the batch is real", template: "%s | Pactora" },
   description:
     "Pre-orders for small makers. Buyers only sign. When enough orders arrive, every payment is collected in one transaction; if not, nobody's money ever moves. tUSD8 on Aevum testnet.",
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://pactora.vercel.app"),

@@ -11,7 +11,9 @@ import {
   aevumTestnet, cancelAuthTypedData, explorerAddress, explorerTx, isLive, POOL_ADDRESS, publicClient,
   quorumPoolAbi, receiveAuthTypedData, TUSD8_DECIMALS,
 } from "@/lib/aevum";
-import { DEMO_SIGNERS, formatTusd, formatUtc, shortHex, type Campaign, type Pledge } from "@/lib/data";
+import { DEMO_SIGNERS } from "@/lib/data/seed";
+import { formatTusd, formatUtc, shortHex } from "@/lib/format";
+import type { Campaign, Pledge } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type LogEntry = { label: string; tx: string; mock: boolean };
@@ -39,11 +41,18 @@ export function CampaignRoom({ campaign }: { campaign: Campaign }) {
     campaign.createTx !== "0x" ? [{ label: "Batch opened", tx: campaign.createTx, mock: !isLive }] : [],
   );
   const [copied, setCopied] = useState(false);
+  const [settleTx, setSettleTx] = useState<{ tx: string; mock: boolean } | null>(
+    campaign.settleTx ? { tx: campaign.settleTx, mock: !isLive } : null,
+  );
 
   const count = pledges.length;
   const ready = status === "open" && count >= campaign.minOrders;
   const live = isLive && /^\d+$/.test(campaign.id);
   const iAmIn = mine !== null && pledges.some((p) => p.address === mine);
+  // Practice mode lets the next demo wallet sign while the last one can still withdraw,
+  // so the counter can be walked all the way to the threshold.
+  const practiceLeft = !live && DEMO_SIGNERS.some((s) => !pledges.some((p) => p.address === s.address));
+  const canJoin = live ? !iAmIn : practiceLeft;
 
   async function join() {
     setPhase({ kind: "busy", what: "Waiting for your signature…" });
@@ -69,7 +78,7 @@ export function CampaignRoom({ campaign }: { campaign: Campaign }) {
         tx = r.txHash;
         mock = r.mode === "mock";
       } else if (live) {
-        throw new Error("Unlock a browser wallet on Aevum testnet to sign.");
+        throw new Error("Open a browser wallet on Aevum testnet to sign.");
       } else {
         // TODO: swap mock for the live path above once the pool is deployed.
         const next = DEMO_SIGNERS.find((s) => !pledges.some((p) => p.address === s.address));
@@ -119,6 +128,7 @@ export function CampaignRoom({ campaign }: { campaign: Campaign }) {
     setPhase({ kind: "busy", what: `Collecting ${count} payments in one transaction…` });
     try {
       const r = await relay({ action: "settle", poolId: campaign.poolId });
+      setSettleTx({ tx: r.txHash, mock: r.mode === "mock" });
       setStatus("settled");
       setPledges((p) => p.map((x) => ({ ...x, state: "collected" })));
       setLog((l) => [{ label: `${count} payments collected, ${formatTusd(count * campaign.pricePerOrder)} to ${campaign.maker}`, tx: r.txHash, mock: r.mode === "mock" }, ...l]);
@@ -171,7 +181,7 @@ export function CampaignRoom({ campaign }: { campaign: Campaign }) {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            {status === "open" && !iAmIn && (
+            {status === "open" && canJoin && (
               <Button size="lg" onClick={join} disabled={phase.kind === "busy" || count >= campaign.maxOrders}>
                 Count me in
               </Button>
@@ -221,7 +231,7 @@ export function CampaignRoom({ campaign }: { campaign: Campaign }) {
           <ol ref={listRef} className="divide-y-2 divide-foreground">
             {pledges.length === 0 && <li className="px-4 py-6 text-sm">No signatures yet. Be the first.</li>}
             {pledges.map((p) => (
-              <li key={p.address} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+              <li key={p.address} className="flex items-center justify-between gap-3 overflow-x-auto px-4 py-2.5 text-sm">
                 <span className="min-w-0">
                   <span className="font-semibold">{p.buyer}</span>{" "}
                   <a href={explorerAddress(p.address)} target="_blank" rel="noreferrer" className="text-muted-foreground underline-offset-2 hover:underline">
@@ -242,20 +252,45 @@ export function CampaignRoom({ campaign }: { campaign: Campaign }) {
           </ol>
         </Card>
 
+        {status === "settled" && settleTx && (
+          <Card>
+            <CardBar>
+              <span>Receipt, one transaction</span>
+              <span>{count} transfers</span>
+            </CardBar>
+            <div className="overflow-x-auto border-b-2 border-foreground px-4 py-2.5 text-sm">
+              Settle tx{" "}
+              {settleTx.mock ? (
+                <span className="text-muted-foreground">practice {shortHex(settleTx.tx)}</span>
+              ) : (
+                <a className="font-semibold underline" href={explorerTx(settleTx.tx)} target="_blank" rel="noreferrer">
+                  {shortHex(settleTx.tx)}
+                </a>
+              )}
+            </div>
+            <ol className="divide-y-2 divide-foreground text-sm">
+              {pledges.map((p, i) => (
+                <li key={`receipt-${p.address}`} className="flex items-center justify-between gap-3 overflow-x-auto px-4 py-2">
+                  <span className="min-w-0 whitespace-nowrap">
+                    {i + 1}. {p.buyer} <span className="text-muted-foreground">{shortHex(p.address)}</span> to pool
+                  </span>
+                  <span className="whitespace-nowrap">{formatTusd(campaign.pricePerOrder)}</span>
+                </li>
+              ))}
+            </ol>
+            <div className="flex items-center justify-between gap-3 overflow-x-auto border-t-2 border-foreground px-4 py-2.5 text-sm font-semibold">
+              <span className="whitespace-nowrap">Total to {campaign.maker}</span>
+              <span className="whitespace-nowrap">{formatTusd(count * campaign.pricePerOrder)}</span>
+            </div>
+          </Card>
+        )}
+
         <Card>
           <CardBar>On-chain trail</CardBar>
           <ul className="divide-y-2 divide-foreground text-sm">
-            {campaign.settleTx && status === "settled" && campaign.status === "settled" && (
-              <li className="px-4 py-2.5">
-                Collected in one transaction{" "}
-                <a className="font-semibold underline" href={explorerTx(campaign.settleTx)} target="_blank" rel="noreferrer">
-                  {shortHex(campaign.settleTx)}
-                </a>
-              </li>
-            )}
             {log.length === 0 && <li className="px-4 py-4">Nothing on chain yet.</li>}
             {log.map((e) => (
-              <li key={`${e.tx}-${e.label}`} className="px-4 py-2.5">
+              <li key={`${e.tx}-${e.label}`} className="overflow-x-auto px-4 py-2.5">
                 {e.label}{" "}
                 {e.mock ? (
                   <span className="text-muted-foreground">practice {shortHex(e.tx)}</span>

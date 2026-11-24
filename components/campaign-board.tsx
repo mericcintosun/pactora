@@ -5,7 +5,9 @@ import { useMemo, useState } from "react";
 import { useAutoAnimate } from "@formkit/auto-animate/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { activePledges, formatTusd, formatUtc, type Campaign, type CampaignStatus } from "@/lib/data";
+import { activePledges } from "@/lib/data/seed";
+import { formatTusd, formatUtc } from "@/lib/format";
+import type { Campaign, CampaignStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type Filter = "all" | CampaignStatus;
@@ -79,7 +81,7 @@ export function CampaignBoard({
 
       <ul ref={listRef} className="divide-y-2 divide-foreground">
         {rows.length === 0 && (
-          <li className="px-4 py-8 text-sm">No campaigns in this state yet. Try another filter.</li>
+          <li className="px-4 py-8 text-sm">No batches here yet.</li>
         )}
         {rows.map(({ c, signed, needed }) => {
           const pct = Math.min(100, Math.round((signed / c.minOrders) * 100));

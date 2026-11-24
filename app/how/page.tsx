@@ -82,7 +82,7 @@ domain: { name: "tUSD8", version: "2", chainId: 44005 }`}
               {rows.map(([k, v, href]) => (
                 <div key={k} className="grid gap-1 px-5 py-3 sm:grid-cols-[10rem_1fr]">
                   <dt className="text-xs font-semibold uppercase tracking-widest">{k}</dt>
-                  <dd className="break-all text-sm">
+                  <dd className="overflow-x-auto break-all text-sm">
                     {href ? (
                       <a href={href} target="_blank" rel="noreferrer" className="underline">
                         {v}

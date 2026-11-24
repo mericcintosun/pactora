@@ -5,6 +5,7 @@ export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 // Palette from IDENTITY.md (ImageResponse cannot read CSS variables).
+// These values equal IDENTITY.md's GROUND, INK and ACCENT: the one allowed hex exception outside globals.css.
 const GROUND = "#f2efe8";
 const INK = "#111111";
 const ACCENT = "#d8261c";
