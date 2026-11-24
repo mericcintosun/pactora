@@ -58,7 +58,7 @@ contract MockTUSD8 {
         uint8 v,
         bytes32 r,
         bytes32 s
-    ) external {
+    ) public virtual {
         require(to == msg.sender, "caller must be the payee");
         require(block.timestamp > validAfter, "authorization is not yet valid");
         require(block.timestamp < validBefore, "authorization is expired");
@@ -87,10 +87,58 @@ contract MockTUSD8 {
         require(signer != address(0), "invalid signature");
     }
 
-    function _transfer(address from, address to, uint256 value) private {
+    function _transfer(address from, address to, uint256 value) internal virtual {
         require(balanceOf[from] >= value, "transfer amount exceeds balance");
         balanceOf[from] -= value;
         balanceOf[to] += value;
         emit Transfer(from, to, value);
+    }
+}
+
+interface ISettle {
+    function settle(uint256 poolId) external;
+}
+
+/// Hostile variant for the reentrancy test: on the first redemption it calls back into
+/// QuorumPool.settle for the same pool before doing the real transfer.
+contract ReentrantTUSD8 is MockTUSD8 {
+    ISettle public target;
+    uint256 public targetPool;
+    bool public armed;
+
+    function arm(ISettle target_, uint256 poolId) external {
+        target = target_;
+        targetPool = poolId;
+        armed = true;
+    }
+
+    function receiveWithAuthorization(
+        address from,
+        address to,
+        uint256 value,
+        uint256 validAfter,
+        uint256 validBefore,
+        bytes32 nonce,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) public override {
+        if (armed) {
+            armed = false;
+            target.settle(targetPool);
+        }
+        super.receiveWithAuthorization(from, to, value, validAfter, validBefore, nonce, v, r, s);
+    }
+}
+
+/// Fee-on-transfer variant for the measured-delta test: every transfer burns 1 percent,
+/// so the pool receives less than the signed value of each authorization.
+contract FeeOnTransferTUSD8 is MockTUSD8 {
+    function _transfer(address from, address to, uint256 value) internal override {
+        require(balanceOf[from] >= value, "transfer amount exceeds balance");
+        uint256 fee = value / 100;
+        balanceOf[from] -= value;
+        balanceOf[to] += value - fee;
+        emit Transfer(from, to, value - fee);
     }
 }

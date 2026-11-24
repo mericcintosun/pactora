@@ -54,4 +54,6 @@ export const REVERT_HINTS: Record<string, string> = {
   NotAllowed: "Only the buyer, or the relayer after a cancellation, can do that.",
   BelowThreshold: "Below the minimum. Nobody was charged.",
   TransferFailed: "The payout to the seller failed, so the whole collection was undone.",
+  Reentrancy: "A second collect tried to run inside the first one and was refused. Nothing moved.",
+  ShortDelivery: "The token delivered less than the signed total, so the whole collection was undone.",
 };

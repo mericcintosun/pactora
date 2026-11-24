@@ -142,6 +142,8 @@ export const quorumPoolAbi = [
   { type: "error", name: "NotAllowed", inputs: [] },
   { type: "error", name: "BelowThreshold", inputs: [] },
   { type: "error", name: "TransferFailed", inputs: [] },
+  { type: "error", name: "Reentrancy", inputs: [] },
+  { type: "error", name: "ShortDelivery", inputs: [] },
 ] as const;
 
 export const tusd8Abi = [

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {QuorumPool, IERC3009Token} from "../src/QuorumPool.sol";
-import {MockTUSD8} from "./MockTUSD8.sol";
+import {MockTUSD8, ReentrantTUSD8, FeeOnTransferTUSD8, ISettle} from "./MockTUSD8.sol";
 
 /// Minimal cheatcode surface, declared locally because forge-std is not installed.
 interface Vm {
@@ -206,6 +206,40 @@ contract QuorumPoolTest {
         (uint8 v, bytes32 r, bytes32 s) = _sign(BUYER_PK, id, PRICE);
         vm.expectRevert(QuorumPool.AlreadyPledged.selector);
         pool.pledge(id, buyer, 0, v, r, s);
+    }
+
+    /// Finding 1 (reentrancy): a token that calls back into settle mid-redemption hits the
+    /// nonReentrant lock, the whole settle reverts and nobody is charged.
+    function test_settleReentrancyReverts() public {
+        ReentrantTUSD8 evil = new ReentrantTUSD8();
+        token = evil;
+        pool = new QuorumPool(IERC3009Token(address(evil)));
+        uint256 id = _open(5, 12, PRICE);
+        _pledgeMany(id, 5, PRICE);
+        evil.arm(ISettle(address(pool)), id);
+
+        vm.expectRevert(QuorumPool.Reentrancy.selector);
+        pool.settle(id);
+
+        _eq(token.balanceOf(SELLER), 0, "seller unpaid");
+        _eq(token.balanceOf(vm.addr(BUYER_PK)), PRICE, "buyer untouched");
+        _eq(pool.activeCount(id), 5, "pledges intact");
+    }
+
+    /// Finding 2 (measured delta): a fee-on-transfer token delivers less than orders x price,
+    /// so settle reverts before paying the seller instead of paying out of other funds.
+    function test_settleRevertsWhenTokenDeliversLess() public {
+        FeeOnTransferTUSD8 feeToken = new FeeOnTransferTUSD8();
+        token = feeToken;
+        pool = new QuorumPool(IERC3009Token(address(feeToken)));
+        uint256 id = _open(5, 12, PRICE);
+        _pledgeMany(id, 5, PRICE);
+
+        vm.expectRevert(QuorumPool.ShortDelivery.selector);
+        pool.settle(id);
+
+        _eq(token.balanceOf(SELLER), 0, "seller unpaid");
+        _eq(token.balanceOf(vm.addr(BUYER_PK)), PRICE, "buyer untouched");
     }
 
     /// For any order count and price in range, settle moves exactly orders x price to the seller.

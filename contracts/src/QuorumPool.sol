@@ -17,6 +17,7 @@ interface IERC3009Token {
         bytes32 s
     ) external;
     function transfer(address to, uint256 value) external returns (bool);
+    function balanceOf(address account) external view returns (uint256);
 }
 
 /// @title QuorumPool
@@ -27,6 +28,16 @@ interface IERC3009Token {
 /// transaction and the total goes to the seller. If any single redemption fails the
 /// whole settle reverts. If the threshold is never met, nothing ever moves and the
 /// signatures simply expire at the deadline.
+///
+/// Access summary (every external state-mutating function):
+///   createPool      open by design: anyone may sell; msg.sender becomes the seller.
+///   pledge          open by design: the buyer's EIP-712 signature is the authorization; the caller (relayer) only pays gas.
+///   withdrawPledge  guarded: the buyer, or anyone once tUSD8's authorizationState shows the authorization cancelled.
+///   dropPledge      guarded: seller only.
+///   settle          open by design: anyone may trigger it once the threshold is met; the payout always goes to p.seller.
+///                   Also guarded by the `nonReentrant` lock and a measured balance delta.
+/// The pool never calls approve or transferFrom and never takes a caller-supplied `from`:
+/// funds arrive only through receiveWithAuthorization, which only this contract (the `to`) can redeem.
 contract QuorumPool {
     // keccak256("ReceiveWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)")
     bytes32 public constant RECEIVE_WITH_AUTHORIZATION_TYPEHASH =
@@ -63,6 +74,10 @@ contract QuorumPool {
     mapping(uint256 => address[]) private _entrants;
     mapping(uint256 => mapping(address => Auth)) private _auths;
 
+    /// Reentrancy lock for settle, the only function that makes non-view token calls.
+    /// 1 = unlocked, 2 = locked (non-zero both ways keeps the SSTORE cheap).
+    uint256 private _locked = 1;
+
     event PoolCreated(uint256 indexed poolId, address indexed seller, uint256 price, uint32 minOrders, uint64 deadline, string title);
     event Pledged(uint256 indexed poolId, address indexed buyer, bytes32 nonce, uint256 activeCount);
     event PledgeWithdrawn(uint256 indexed poolId, address indexed buyer, uint256 activeCount);
@@ -80,13 +95,24 @@ contract QuorumPool {
     error NotAllowed();
     error BelowThreshold();
     error TransferFailed();
+    error Reentrancy();
+    error ShortDelivery();
 
     constructor(IERC3009Token token_) {
         token = token_;
     }
 
+    modifier nonReentrant() {
+        if (_locked == 2) revert Reentrancy();
+        _locked = 2;
+        _;
+        _locked = 1;
+    }
+
     // ------------------------------------------------------------------ sellers
 
+    /// @notice Open a pool. Open by design because anyone may sell: the caller becomes
+    /// the seller and is the only address settle ever pays.
     function createPool(string calldata title, uint256 price, uint32 minOrders, uint32 maxOrders, uint64 deadline)
         external
         returns (uint256 poolId)
@@ -108,6 +134,10 @@ contract QuorumPool {
 
     /// @notice Seller escape hatch: remove a pledge whose buyer emptied their wallet,
     /// so one bad authorization cannot block settle for everyone else.
+    /// A pledged buyer who emptied their wallet blocks settle (one failed redemption
+    /// reverts the whole transaction) until the seller calls dropPledge on them. This is
+    /// the unwedge path; the pool holds no funds between transactions, so no pause exists.
+    /// Guarded: seller only.
     function dropPledge(uint256 poolId, address buyer) external {
         // checks
         Pool storage p = _openPool(poolId);
@@ -128,6 +158,9 @@ contract QuorumPool {
 
     /// @notice Register a signed authorization. Usually submitted by the relayer so
     /// the buyer pays no gas. The signature is checked here against tUSD8's domain.
+    /// Open by design because the buyer's signature itself is the authorization; the
+    /// caller only pays gas. No reentrancy lock: the only token calls here are views
+    /// (authorizationState, DOMAIN_SEPARATOR), made before any state is written.
     function pledge(uint256 poolId, address buyer, uint256 validAfter, uint8 v, bytes32 r, bytes32 s) external {
         // checks: pool open, buyer not active, room left, nonce unused, signature recovers to buyer.
         // The two token reads below are view calls; no state is written before they return.
@@ -164,7 +197,8 @@ contract QuorumPool {
 
     /// @notice Withdraw a pledge. Callable by the buyer, or by anyone (the relayer)
     /// once the buyer has cancelled the authorization on the token itself via
-    /// cancelAuthorization. Either way the buyer needs no gas.
+    /// cancelAuthorization. Either way the buyer needs no gas. No reentrancy lock: the
+    /// only token call is the authorizationState view.
     function withdrawPledge(uint256 poolId, address buyer) external {
         // checks (the token read is a view call)
         _openPool(poolId);
@@ -178,27 +212,26 @@ contract QuorumPool {
     // ------------------------------------------------------------------- settle
 
     /// @notice Redeem every active authorization and pay the seller, atomically.
-    function settle(uint256 poolId) external {
+    /// Open by design because anyone may trigger it once the threshold is met, and the
+    /// payout always goes to p.seller. nonReentrant: this is the only function that makes
+    /// non-view token calls (receiveWithAuthorization, transfer).
+    function settle(uint256 poolId) external nonReentrant {
         // checks
         Pool storage p = _openPool(poolId);
         uint256 orders = activeCount[poolId];
         if (orders < p.minOrders) revert BelowThreshold();
 
-        // effects: close the pool before any token call, so a re-entrant settle hits PoolClosed.
+        // effects: close the pool before any token call, so a re-entrant settle hits PoolClosed
+        // even without the lock (defence in depth).
         p.settled = true;
         uint256 total = orders * p.price;
 
         // interactions: entrants.length is capped at MAX_ENTRIES (256) in pledge(), so the loop is bounded.
-        address[] storage entrants = _entrants[poolId];
-        uint256 n = entrants.length;
-        for (uint256 i = 0; i < n; i++) {
-            address buyer = entrants[i];
-            Auth storage a = _auths[poolId][buyer];
-            if (!a.active) continue;
-            token.receiveWithAuthorization(
-                buyer, address(this), p.price, a.validAfter, p.deadline, nonceFor(poolId, buyer), a.v, a.r, a.s
-            );
-        }
+        // The pool's own balance is measured around the redemptions, so a token that delivers
+        // less than it was asked to (a fee, a hook, a bug) reverts here before the seller is paid.
+        uint256 balanceBefore = token.balanceOf(address(this));
+        _redeemAll(poolId, p);
+        if (token.balanceOf(address(this)) < balanceBefore + total) revert ShortDelivery();
         if (!token.transfer(p.seller, total)) revert TransferFailed();
         emit Settled(poolId, p.seller, orders, total);
     }
@@ -219,6 +252,20 @@ contract QuorumPool {
         p = pools[poolId];
         if (p.seller == address(0)) revert UnknownPool();
         if (p.settled || block.timestamp >= p.deadline) revert PoolClosed();
+    }
+
+    /// Interactions only, called from settle under the lock: redeem every active authorization.
+    /// Its own stack frame keeps settle clear of "stack too deep" with the balance-delta local.
+    function _redeemAll(uint256 poolId, Pool storage p) private {
+        address[] storage entrants = _entrants[poolId];
+        uint256 n = entrants.length;
+        for (uint256 i = 0; i < n; i++) {
+            address buyer = entrants[i];
+            Auth storage a = _auths[poolId][buyer];
+            if (!a.active) continue;
+            bytes32 nonce = nonceFor(poolId, buyer);
+            token.receiveWithAuthorization(buyer, address(this), p.price, a.validAfter, p.deadline, nonce, a.v, a.r, a.s);
+        }
     }
 
     /// Effects only. Callers check `active` first.
