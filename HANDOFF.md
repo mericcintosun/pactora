@@ -1,3 +1,7 @@
+REDEPLOY NEEDED: contracts/src/QuorumPool.sol (reentrancy guard, balance delta)
+
+Human: run `cd contracts && forge test` first (two new tests), then press the Kontrat deploy step, run `contracts/script/Smoke.s.sol` with `DEPLOYED_CONTRACT` set, put the new address in README "Testnet addresses" and in SECURITY.md section 1 (both say "filled after deploy" / "not deployed yet" today), and set `NEXT_PUBLIC_CONTRACT_ADDRESS` on Vercel.
+
 # HANDOFF: Pactora
 
 You are picking up a working Next.js 15 scaffold. Read this file top to bottom, then read `IDENTITY.md`, then start on Mission item 1. Keep `npm run build` green after every change.
@@ -301,3 +305,118 @@ Runner: `npm install`, `npm run build`, `npm test`, `npm run demo:reset` three t
 ### Next best step
 
 Phase 4: landing, OG image and a security pass (relay abuse limits, header review), then kit signatures 2 and 3 in Phase 5.
+
+## 9. Phase 4: judge surface, second wow, security pass
+
+### Goal
+
+DEMO.md step 7 (the sort and compare control, kit signature 3), a bounty table and DELIVERY.md, a mobile nav and responsive fixes, social metadata, then the contract and wallet security pass with SECURITY.md. After this phase the demo should run steps 1 to 7 on seed data with no wallet.
+
+### Status
+
+All eight slices are written. Nothing was built, tested or run (see Commands run). The contract changed, so a redeploy is needed (top of this file).
+
+Bounty matrix: no bounty rows to integrate. `targetTracks` holds only "1st Place", "2nd Place" and "3rd Place", all `main-placement` with `entryMode: automatic`. There are no sponsor-bounty rows and no rows were dropped. All three are in the README "Bounty table" and in DELIVERY.md.
+
+### Decisions
+
+- **Sort control** (`components/campaign-board.tsx:30` `SORTS`, `:44` `COMPARE`): it shows only on the full board (`/pledge`, through `BatchWorkspace`) and never on the compact home board. It has four `aria-pressed` buttons: "Board order" (the server-rendered order, selected on load, so the HTML matches with JavaScript off) plus the three asked-for keys "Needs most signatures" (minOrders minus active pledges, most first), "Closes soonest" (gathering batches by deadline ascending, then closed ones newest first) and "Price" (pricePerOrder ascending). Ties fall back to pool number. I added "Board order" so a judge can get back to the starting order. `app/pledge/page.tsx` needed no pass-through: the board already receives the campaigns from `BatchWorkspace`. The file only got a subtitle line and a mobile heading size.
+- **Lapsed compare** (`components/campaign-room.tsx:290` to `292`, `:405` to `421`): rows carry before, after and change (after minus before). The sort is stable, so with every change at 0 the rows stay put and each row reads "unchanged". The panel shows "Unchanged for all N buyers" (3 on `kavruk-peru-lapsed`). The seed stores one balance per buyer at close, which is both the before and the after value. This is stated in a code comment.
+- **EmptyState** got an optional `action` slot, so the board's empty state can clear the filter in place ("Show all N") instead of linking away.
+- **Touch targets:** `components/ui/button.tsx` gives sizes default, sm and icon `min-h-11` below sm and `sm:min-h-0` from sm up, so every Button on the demo path is at least 44px tall on phones. `components/ui/input.tsx` does the same. I chose this over per-call-site classes so no button can be missed.
+- **Mobile nav** (`components/mobile-nav.tsx`): a Menu disclosure with `aria-expanded` and `aria-controls`. The panel sits under the header's 2px rule (`top-[calc(100%+2px)]`, with the sticky header as the containing block) and lists Campaigns, Live batch, How it works and Open a batch. It closes on link click and on route change (render-time adoption, no effect). `navItems()` in `components/nav-links.tsx` feeds both navs, so the desktop links and the panel cannot drift apart.
+- **Pool address near actions** (`components/pool-address.tsx`): shortened address with the full one in `title`, a copy control and an explorer link (`EXPLORER_URL`). It shows "Practice mode: no contract connected" when `POOL_ADDRESS` is unset. Used in the campaign room under sign, withdraw and collect, and in the batch desk footer under create.
+- **Plain-language lines:** the campaign room shows the sign, withdraw and collect sentences above the buttons whenever each button is visible, so the sentence is on screen before any popup. The batch desk shows the create sentence above the wallet bar. Amounts come from the campaign price or the form draft.
+- **Contract:** the reentrancy lock is a `_locked` uint (1 or 2) with modifier `nonReentrant`, on `settle` only. The redemption loop moved into private `_redeemAll`, unchanged in behaviour, so the extra `balanceBefore` local cannot push `settle` into "stack too deep" (foundry.toml has no via-IR). New errors `Reentrancy` and `ShortDelivery` were added to the viem ABI (`lib/aevum.ts`) and to `REVERT_HINTS` (`lib/errors.ts`). `MockTUSD8.receiveWithAuthorization` is now `public virtual` and `_transfer` is `internal virtual`, so the two hostile variants (`ReentrantTUSD8`, `FeeOnTransferTUSD8` in `contracts/test/MockTUSD8.sol`) can override them.
+- **metadataBase and proof default** now point to the tracked URL https://pactora-smoky.vercel.app. `NEXT_PUBLIC_SITE_URL` still overrides both, and `.env.example` now shows the tracked URL.
+- **Footer About and security block** (`app/layout.tsx`): contract address with an explorer link (or the practice-mode text), "Aevum testnet, chain id 44005", the repo link and SECURITY.md on GitHub, all with `rel="noopener noreferrer"`.
+- The farm's health probe flagged the demo URL as missing the project fingerprint. Human: check that https://pactora-smoky.vercel.app/__farm.txt serves `public/__farm.txt`, which means the deployment is this repo and this branch.
+
+### Contract audit (Slice 5)
+
+| Item | Result | Evidence |
+| --- | --- | --- |
+| Access per mutating function | `createPool` open by design, `pledge` open by design, `withdrawPledge` buyer or after on-token cancel, `dropPledge` seller only, `settle` open by design | `contracts/src/QuorumPool.sol:32` to `40` summary plus a NatSpec line on each function |
+| 1 Reentrancy | fixed: `nonReentrant` on `settle`; `pledge` and `withdrawPledge` make view calls only (commented) | `QuorumPool.sol:105`, `:218`; test `test_settleReentrancyReverts` |
+| 2 Measured delta | fixed: balance before and after `_redeemAll`, revert `ShortDelivery` before paying the seller; `balanceOf` added to `IERC3009Token` | `QuorumPool.sol:234`; test `test_settleRevertsWhenTokenDeliversLess` |
+| 3 Return values | `token.transfer` checked (`TransferFailed`). Grep for `approve` and `type(uint256).max` under `contracts/src` finds only the doc comment saying the pool never calls approve | `QuorumPool.sol` settle |
+| 4 Events | `PoolCreated`, `Pledged`, `PledgeWithdrawn`, `PledgeDropped`, `Settled`: every value move or state change emits; `settle` and `pledge` confirmed | `QuorumPool.sol` |
+| 5 Escape hatch | no pause needed (the pool holds no funds between transactions); `dropPledge` is the unwedge path, commented | `QuorumPool.sol:133` to `141` |
+| 7 Smoke script | `contracts/script/Smoke.s.sol` exists, reads `DEPLOYED_CONTRACT` via `vm.envAddress`, one `createPool` (no tokens move). Unchanged; constructor unchanged so `Deploy.s.sol` still fits | `contracts/script/Smoke.s.sol:21` |
+| 8 App.sol | `contracts/src/App.sol` does not exist (Glob over `contracts/src` lists only `QuorumPool.sol`); nothing to delete | |
+
+Token flow answers:
+- Deposits are measured through the balance delta in `settle` (item 2). The pool pays the seller exactly `orders x price` only after confirming it received at least that much.
+- Withdrawals (`withdrawPledge`) are reachable only by the buyer, or by anyone once tUSD8's `authorizationState` shows the buyer's authorization cancelled or used.
+- There is no stranger-reachable `transferFrom`, and no `from` is caller-supplied: the pool never calls `transferFrom`. Its only token writes are `receiveWithAuthorization` (whose `from` and amount are fixed by the buyer's signature and checked in `pledge`) and `transfer(p.seller, total)`.
+
+### Parked findings (found, not fixed)
+
+| Severity | Finding | Shortest fix |
+| --- | --- | --- |
+| LOW | Tokens sent directly to QuorumPool (or any surplus beyond `total` from a token that over-delivers) have no rescue path | Add an `owner` set in the constructor and an owner-only `sweep(token, to, amount)` that cannot run while `_locked == 2`; needs a redeploy |
+| MEDIUM | Relay rate limit (`app/api/relay/route.ts` `limited`) and idempotency maps are in memory per serverless instance, so they do not hold across Vercel instances | Move both to a shared store (Vercel KV / Upstash) keyed by IP and idempotency key; that needs a new dependency and env key, so ask first |
+| MEDIUM | Relayer gas griefing: anyone can generate fresh keys, sign valid `ReceiveWithAuthorization` messages with zero tUSD8 and have the relayer pay gas for `pledge` on any open pool (up to `maxOrders`). A later settle then reverts until the seller drops them | In `lib/relayer.ts` `submitPledge`, read the buyer's tUSD8 `balanceOf` and the pool price (`pools(poolId)`) in the existing multicall and refuse with `invalid_input` when the balance is below the price |
+| LOW | Pool validation in the relay is implicit: an unknown or closed pool id is refused by viem's gas estimation before any tx is sent (`UnknownPool` / `PoolClosed` through `REVERT_HINTS`), but it costs one RPC round trip | Add a `pools(poolId)` read to `buyerState` and answer `invalid_input` early |
+| LOW | `lib/config.ts:22` holds the tUSD8 address as the default for `NEXT_PUBLIC_TUSD8_ADDRESS`. It is the token, not the QuorumPool contract (which is never a literal), so I left it | Remove the default and require the env key; it is already in `.env.example` |
+| INFO | No Content-Security-Policy, on purpose: a strict CSP risks breaking next/font and the wallet popup | Add a report-only CSP in Phase 5 and watch for violations |
+
+Body schema (`relayBodySchema`, zod, strict hex shapes) and the per-IP rate limit are in place. `app/api/relay/route.ts` was not changed.
+
+### Wallet and web sweep (Slice 6), with the greps that prove it
+
+- `eth_requestAccounts` appears only in `lib/wallet-state.ts:125` (`connectInjected`). It is called only from `connect()` in `components/campaign-room.tsx` and `components/batch-workspace.tsx`, and those run only from button handlers (`onConnect`, `onSwitched`, and `submit`/`open` from "Count me in", "Withdraw my signature" and the form submit). Grep for `useEffect|useLayoutEffect|eth_accounts|ethereum.on` over `app`, `components` and `lib` finds no mount-time wallet request. No fix was needed.
+- `eth_sign` and `personal_sign`: no hits. The only signatures are `signTypedData` at `components/campaign-room.tsx:184` and `:224`.
+- No `approve` anywhere in the app or under `contracts/src`.
+- Key-like strings: grep for `sk-|PRIVATE_KEY|0x[0-9a-fA-F]{64}` over `app`, `components` and `lib` finds only the env name in `lib/config.ts` comments and constant, and the read in `lib/relayer.ts:44`.
+- `http://`: only the SVG `xmlns` in `app/icon.svg`, which is a namespace, not a request.
+- Every `target="_blank"` now carries `rel="noopener noreferrer"` (fixed in `app/how/page.tsx`, `app/pledge/[id]/page.tsx`, `components/mode-line.tsx`, `components/wallet-bar.tsx` and `components/campaign-room.tsx`).
+- The only `<form>` is the batch desk (`components/batch-workspace.tsx`). It calls `preventDefault` and posts nowhere.
+- `next.config.ts` `headers()` adds `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin` and `X-Frame-Options: DENY` on `/:path*`. No CSP.
+
+### Note for the builder's demo video
+
+MetaMask's red Blockaid warning may still appear on a fresh `*.vercel.app` domain, because it is reputation based and not caused by anything the page requests. The recording must show the full wallet flow on screen: connect after a click, the chain prompt for 44005, the typed-data popup with the same amount and recipient as the sentence on the page, and the settle tx on the explorer. If the red screen appears, record it and note it here.
+
+### Failed attempts
+
+None. No error was seen twice, because nothing could be run.
+
+### Files changed
+
+- Created: `DELIVERY.md`, `SECURITY.md`, `components/mobile-nav.tsx`, `components/pool-address.tsx`, `.farm-commits.json`.
+- Edited: `README.md`, `DEMO.md`, `CLAUDE.md` (7 steps), `HANDOFF.md`, `components/campaign-board.tsx`, `components/campaign-room.tsx`, `components/batch-workspace.tsx`, `components/empty-state.tsx`, `components/site-header.tsx`, `components/nav-links.tsx`, `components/wallet-bar.tsx`, `components/mode-line.tsx`, `components/ui/button.tsx`, `components/ui/input.tsx`, `components/ui/card.tsx` (CardBar wraps), `app/page.tsx`, `app/layout.tsx`, `app/pledge/page.tsx`, `app/pledge/[id]/page.tsx`, `app/how/page.tsx`, `app/how/loading.tsx`, `scripts/proof.mjs`, `.env.example`, `next.config.ts`, `lib/aevum.ts` (two ABI errors), `lib/errors.ts` (two hints), `contracts/src/QuorumPool.sol`, `contracts/test/QuorumPool.t.sol`, `contracts/test/MockTUSD8.sol`.
+- Not touched: `public/__farm.txt`, `.farm-scaffold.json`, `lib/data/seed.ts`, `app/api/relay/route.ts`, `lib/relayer.ts`, `lib/wallet-state.ts`, `contracts/script/*`, `app/opengraph-image.tsx` (already 1200x630 with the name and claim, hexes `#f2efe8`, `#111111`, `#d8261c` from IDENTITY), `app/icon.svg`.
+- Still present from Phase 1: `lib/data.ts` (empty `export {};`). Runner: `git rm lib/data.ts`.
+
+### Commands run
+
+None. The agent cannot run commands. All checks above are Read, Glob and Grep results.
+
+Runner: `npm install`, `npm run build`, `npm test`, `cd contracts && forge build && forge test`, `npm run demo:reset` three times, `npm run proof`. Highest-risk compile spots: (1) the `MockTUSD8` override chain (`public virtual` / `public override` with `super.receiveWithAuthorization`), (2) `EmptyState`'s new optional `href` and `cta` props (every existing call site still passes both), (3) `metadata.twitter` / `openGraph` typing in `app/layout.tsx`.
+
+### Unverified (Phase 3 list, with what Phase 4 touched)
+
+- TypeScript spots in `lib/wallet-state.ts`, `components/batch-workspace.tsx` `createLive` and the `CampaignRoom` render-time sync: untouched logic, still unverified. Phase 4 touched both component files (UI lines only).
+- `scripts/demo-reset.mjs` query-string reload: untouched, still unverified.
+- `next/image` sizes in `SceneSlot` and `BrandMark`: untouched. The header around `BrandMark` changed (desktop nav `hidden md:flex`, MobileNav), so check the mark at 360 px.
+- `revalidatePath` after a live write: untouched, still unverified.
+- New in Phase 4: forge compile and the two new tests; the mobile panel position under the sticky header; no horizontal scroll at 360, 768 and 1280 px; absolute `og:image` on `/`.
+
+### Unmet or partial spec items
+
+- The spec asked for exactly three sort keys. The control has those three plus "Board order" (`components/campaign-board.tsx:30` to `35`), which is the initial, server-rendered order. Remove that entry if three buttons are a hard rule; the initial state then becomes "no key pressed".
+- The README bounty rows are byte identical to the matrix. Naming `IERC3009Token`, `receiveWithAuthorization` and `lib/aevum.ts` "in the row text" would have broken byte identity, so they are named in the paragraph right under the table.
+- The lapsed "Sort by balance change" cannot visibly reorder on the seed, because every change is 0. That is the point of the step and is said on screen.
+- The Mermaid edges in README (lines 33 to 39 and the new layout diagram) still hold ` -- `, the known exception.
+- `README.md` QuorumPool address and SECURITY.md section 1 say "filled after deploy" / "not deployed yet" until the human deploys.
+- The README demo-path Proof block still names `https://pactora.vercel.app` from the last `npm run proof` run. It updates on the next run, because the default is now the tracked URL.
+
+### Open questions
+
+- No new dependency, no schema change, no new page route and no new env key.
+- Should the LOW sweep fix (owner plus `sweep`) go into the same redeploy? It adds an owner role, so I did not do it without asking.
+
+### Next best step
+
+Phase 5, the frontend pass: kit signature 2 (board row morphs into the campaign room header through `motion` `layoutId`, wrapped in `LayoutGroup`), then the visual redesign pass. Before that, the human runs forge test and the redeploy above.
