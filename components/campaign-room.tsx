@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAutoAnimate } from "@formkit/auto-animate/react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion, MotionConfig, useReducedMotion } from "motion/react";
 import { parseUnits, type Address, type Hex } from "viem";
 import { EmptyState } from "@/components/empty-state";
 import { PoolAddress } from "@/components/pool-address";
@@ -98,6 +98,8 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
   const [copied, setCopied] = useState(false);
   // Kit signature 3 on a lapsed batch: reorder the before/after rows by balance change.
   const [byChange, setByChange] = useState(false);
+  // The count the server rendered; the counter animates only when it moves away from this.
+  const [firstCount] = useState(() => activeOf(campaign).length);
   const [receipt, setReceipt] = useState<Receipt | null>(
     campaign.settleTx ? { tx: campaign.settleTx, mock: !live } : null,
   );
@@ -299,8 +301,11 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
   const collectLine = `Collect asks ${poolName} to redeem all ${count} signatures in one transaction and send ${formatTusd(count * campaign.pricePerOrder)} to ${campaign.maker}; you sign nothing and the relayer pays the gas.`;
 
   return (
+    <MotionConfig reducedMotion="user">
     <div className="grid gap-8 lg:grid-cols-12">
-      <Card className="lg:col-span-7">
+      {/* Kit K7 signature 2: same layoutId as the board row and the batch desk's room preview. */}
+      <motion.div layoutId={`campaign-${campaign.id}`} layoutDependency={campaign.id} className="lg:col-span-7">
+      <Card>
         <CardBar>
           <span>{status === "open" ? "Gathering signatures" : status === "settled" ? "Collected" : "Lapsed, nobody charged"}</span>
           <span>Closes {formatUtc(campaign.deadline)}</span>
@@ -309,7 +314,8 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
           <div className="flex items-end gap-4">
             <motion.span
               key={count}
-              initial={reduce ? false : { scale: 0.96, opacity: 0.4 }}
+              // The server-rendered count starts at full opacity; only a changed count plays the M3 entrance.
+              initial={reduce || count === firstCount ? false : { scale: 0.96, opacity: 0.4 }}
               animate={{ scale: 1, opacity: 1 }}
               transition={{ duration: 0.38, ease: "easeOut" }}
               className="font-display text-7xl font-bold leading-none"
@@ -396,6 +402,7 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
           )}
         </CardContent>
       </Card>
+      </motion.div>
 
       <div className="space-y-8 lg:col-span-5">
         <Card>
@@ -537,5 +544,6 @@ export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: Ada
         </Card>
       </div>
     </div>
+    </MotionConfig>
   );
 }

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { LayoutGroup, motion, MotionConfig } from "motion/react";
 import { parseEventLogs, parseUnits, type Address, type Hex } from "viem";
 import { CampaignBoard } from "@/components/campaign-board";
 import { PoolAddress } from "@/components/pool-address";
@@ -13,7 +14,7 @@ import { WalletBar } from "@/components/wallet-bar";
 import { POOL_ADDRESS, publicClient, quorumPoolAbi, TUSD8_DECIMALS } from "@/lib/aevum";
 import { RECEIPT_TIMEOUT_MS, type AdapterMode } from "@/lib/config";
 import { DEMO_SIGNERS, hexFrom } from "@/lib/data/seed";
-import { shortHex } from "@/lib/format";
+import { formatTusd, shortHex } from "@/lib/format";
 import { withTimeoutAndRetry } from "@/lib/http";
 import type { Campaign } from "@/lib/types";
 import {
@@ -87,6 +88,11 @@ export function BatchWorkspace({ campaigns, initial, mode }: { campaigns: Campai
   const [opened, setOpened] = useState<{ poolId?: number } | null>(null);
   const [drafts, setDrafts] = useState<Campaign[]>([]);
   const busy = isBusy(state);
+  // Once router.refresh() brings a live pool in from the chain, its local draft row is dropped.
+  const board = [...drafts.filter((d) => !campaigns.some((c) => /^\d+$/.test(c.id) && c.poolId === d.poolId)), ...campaigns];
+  const [preview, setPreview] = useState<{ id: string; signed: number } | null>(null);
+  const previewCampaign = preview ? board.find((c) => c.id === preview.id) : undefined;
+  const previewed = preview && previewCampaign ? { c: previewCampaign, signed: preview.signed } : null;
 
   const set = (k: keyof BatchDraft) => (e: React.ChangeEvent<HTMLInputElement>) => setDraft((d) => ({ ...d, [k]: e.target.value }));
 
@@ -241,10 +247,53 @@ export function BatchWorkspace({ campaigns, initial, mode }: { campaigns: Campai
       </Card>
 
       <div className="lg:col-span-7">
-        {/* Once router.refresh() brings a live pool in from the chain, its local draft row is dropped. */}
-        <CampaignBoard
-          campaigns={[...drafts.filter((d) => !campaigns.some((c) => /^\d+$/.test(c.id) && c.poolId === d.poolId)), ...campaigns]}
-        />
+        {/* Kit K7 signature 2: "Preview room" on a row morphs its title block (layoutId campaign-<id>)
+            into this room header. Board and preview share one client tree here, so the morph does
+            not depend on a route change. MotionConfig honors prefers-reduced-motion. */}
+        <MotionConfig reducedMotion="user">
+          <LayoutGroup>
+            {previewed && (
+              <motion.section
+                layoutId={`campaign-${previewed.c.id}`}
+                layoutDependency={preview?.id ?? "none"}
+                aria-label={`Room preview: ${previewed.c.product}`}
+                className="mb-6 border-2 border-foreground bg-background"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 bg-foreground px-4 py-2 text-xs font-semibold uppercase tracking-widest text-background">
+                  <span>Room preview</span>
+                  <span>
+                    {previewed.c.status === "open" ? "Gathering signatures" : previewed.c.status === "settled" ? "Collected" : "Lapsed, nobody charged"}
+                  </span>
+                </div>
+                <div className="space-y-3 p-5">
+                  <p className="text-xs font-semibold uppercase tracking-widest">
+                    {previewed.c.maker}, {previewed.c.city}
+                  </p>
+                  <h2 className="text-2xl font-bold leading-tight sm:text-3xl">{previewed.c.product}</h2>
+                  <p className="flex flex-wrap items-end gap-x-3">
+                    <span className="font-display text-5xl font-bold leading-none">
+                      {previewed.signed}/{previewed.c.minOrders}
+                    </span>
+                    <span className="pb-1 text-sm">signed at {formatTusd(previewed.c.pricePerOrder)} each</span>
+                  </p>
+                  <div className="flex flex-wrap gap-3">
+                    <Button asChild variant="secondary">
+                      <Link href={`/pledge/${previewed.c.id}`}>Open the room</Link>
+                    </Button>
+                    <Button variant="outline" onClick={() => setPreview(null)}>
+                      Back to the board
+                    </Button>
+                  </div>
+                </div>
+              </motion.section>
+            )}
+            <CampaignBoard
+              campaigns={board}
+              previewId={preview?.id ?? null}
+              onPreview={(id, signed) => setPreview(id ? { id, signed } : null)}
+            />
+          </LayoutGroup>
+        </MotionConfig>
       </div>
     </div>
   );
