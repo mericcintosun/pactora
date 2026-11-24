@@ -4,28 +4,35 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
-/** Header links with the active route marked by aria-current and a visible 2px underline. */
+export type NavItem = { href: string; label: string; active: boolean };
+
+/** The three header destinations with their active state. Shared by the desktop links and MobileNav. */
+export function navItems(pathname: string, liveBatchId: string): NavItem[] {
+  const liveHref = `/pledge/${liveBatchId}`;
+  return [
+    { href: "/pledge", label: "Campaigns", active: pathname === "/pledge" || (pathname.startsWith("/pledge/") && pathname !== liveHref) },
+    { href: liveHref, label: "Live batch", active: pathname === liveHref },
+    { href: "/how", label: "How it works", active: pathname === "/how" || pathname.startsWith("/how/") },
+  ];
+}
+
+/**
+ * Desktop header links (md and up; the parent nav is `hidden md:flex`) with the active
+ * route marked by aria-current and a visible 2px underline.
+ */
 export function NavLinks({ liveBatchId }: { liveBatchId: string }) {
   const pathname = usePathname() ?? "/";
-  const liveHref = `/pledge/${liveBatchId}`;
-
-  const links = [
-    { href: "/pledge", label: "Campaigns", active: pathname === "/pledge" || (pathname.startsWith("/pledge/") && pathname !== liveHref), className: "hidden sm:inline" },
-    { href: liveHref, label: "Live batch", active: pathname === liveHref, className: "hidden md:inline" },
-    { href: "/how", label: "How it works", active: pathname === "/how" || pathname.startsWith("/how/"), className: "inline" },
-  ];
 
   return (
     <>
-      {links.map((l) => (
+      {navItems(pathname, liveBatchId).map((l) => (
         <Link
           key={l.href}
           href={l.href}
           aria-current={l.active ? "page" : undefined}
           className={cn(
-            "text-sm font-semibold decoration-2 underline-offset-4 hover:underline",
+            "inline-flex min-h-11 items-center text-sm font-semibold decoration-2 underline-offset-4 hover:underline",
             l.active && "underline",
-            l.className,
           )}
         >
           {l.label}

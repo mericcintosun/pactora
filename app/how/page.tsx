@@ -32,7 +32,7 @@ export default function HowPage() {
     <div className="mx-auto max-w-6xl px-4 py-12">
       <div className="pactora-enter grid gap-10 border-b-2 border-foreground pb-10 md:grid-cols-12">
         <div className="md:col-span-7">
-          <h1 className="text-5xl font-bold leading-tight">The rules live in the signature</h1>
+          <h1 className="text-4xl font-bold leading-tight sm:text-5xl">The rules live in the signature</h1>
           <p className="mt-5 max-w-[68ch] text-lg leading-relaxed">
             Pactora is one Solidity contract, QuorumPool, and one token feature, EIP-3009 receiveWithAuthorization on tUSD8.
             A buyer signs a message that says: pay this pool exactly this much, before this time, with this nonce. The pool
@@ -66,7 +66,7 @@ domain: { name: "tUSD8", version: "2", chainId: 44005 }`}
 
       <section className="pt-14">
         <h2 className="text-3xl font-bold">Controls a buyer can rely on</h2>
-        <div className="mt-6 grid gap-[2px] border-2 border-foreground bg-foreground sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-6 grid gap-[2px] border-2 border-foreground bg-foreground md:grid-cols-2 lg:grid-cols-3">
           {CONTROLS.map((c) => (
             <article key={c.title} className="bg-background p-5">
               <h3 className="font-display text-xl font-bold">{c.title}</h3>
@@ -82,11 +82,11 @@ domain: { name: "tUSD8", version: "2", chainId: 44005 }`}
           <CardContent className="p-0">
             <dl className="divide-y-2 divide-foreground">
               {rows.map(([k, v, href]) => (
-                <div key={k} className="grid gap-1 px-5 py-3 sm:grid-cols-[10rem_1fr]">
+                <div key={k} className="grid grid-cols-1 gap-1 px-5 py-3 md:grid-cols-[10rem_1fr]">
                   <dt className="text-xs font-semibold uppercase tracking-widest">{k}</dt>
                   <dd className="overflow-x-auto break-all text-sm">
                     {href ? (
-                      <a href={href} target="_blank" rel="noreferrer" className="underline">
+                      <a href={href} target="_blank" rel="noopener noreferrer" className="underline" title={v}>
                         {v}
                       </a>
                     ) : (

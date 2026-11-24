@@ -9,7 +9,7 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
 function CardBar({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
-      className={cn("flex items-center justify-between gap-3 bg-foreground px-4 py-2 text-xs font-semibold uppercase tracking-widest text-background", className)}
+      className={cn("flex flex-wrap items-center justify-between gap-x-3 gap-y-1 bg-foreground px-4 py-2 text-xs font-semibold uppercase tracking-widest text-background", className)}
       {...props}
     />
   );

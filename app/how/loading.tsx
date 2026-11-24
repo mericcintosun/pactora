@@ -14,7 +14,7 @@ export default function HowSkeleton() {
       <div className="mt-14 h-40 border-2 border-foreground bg-muted" />
       <Card className="mt-14">
         <CardBar>Controls a buyer can rely on</CardBar>
-        <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {[0, 1, 2, 3, 4, 5].map((i) => (
             <div key={i} className="h-24 border-2 border-foreground bg-muted" />
           ))}

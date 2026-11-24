@@ -115,7 +115,7 @@ export function WalletBar({
         <div role="status" className={cn(box, "flex flex-wrap items-center justify-between gap-3")}>
           <span>No wallet connected. Signing a live batch needs a browser wallet on Aevum testnet; it never costs you gas.</span>
           {onConnect && (
-            <Button size="sm" variant="outline" onClick={onConnect}>
+            <Button size="sm" variant="outline" className="h-11 sm:h-8" onClick={onConnect}>
               Connect wallet
             </Button>
           )}
@@ -133,7 +133,7 @@ export function WalletBar({
           <p>
             {shortHex(state.account)} is on chain {state.chainId}. Pactora runs on Aevum testnet, chain {AEVUM_CHAIN_ID}.
           </p>
-          <Button size="sm" variant="outline" onClick={doSwitch}>
+          <Button size="sm" variant="outline" className="h-11 sm:h-8" onClick={doSwitch}>
             Switch to Aevum
           </Button>
           {switchNote && <p className="text-warn">{switchNote}</p>}
@@ -160,7 +160,7 @@ export function WalletBar({
           {state.mock ? (
             <span className="text-muted-foreground">Practice hash {shortHex(state.txHash)}, not on chain.</span>
           ) : (
-            <a className="font-semibold underline" href={explorerTx(state.txHash)} target="_blank" rel="noreferrer">
+            <a className="font-semibold underline" href={explorerTx(state.txHash)} target="_blank" rel="noopener noreferrer" title={state.txHash}>
               {shortHex(state.txHash)} on the explorer
             </a>
           )}
@@ -171,7 +171,7 @@ export function WalletBar({
         <div role="status" className={cn(box, "flex flex-wrap items-center justify-between gap-3")}>
           <span>The wallet was closed before the {ACTION_NOUN[state.action]} was signed. Nothing was signed and nothing moved.</span>
           {onRetry && (
-            <Button size="sm" variant="outline" onClick={onRetry}>
+            <Button size="sm" variant="outline" className="h-11 sm:h-8" onClick={onRetry}>
               Open the wallet again
             </Button>
           )}

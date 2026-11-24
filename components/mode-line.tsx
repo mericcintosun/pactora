@@ -12,7 +12,7 @@ export function ModeLine({ mode, fallback = false, className }: { mode: AdapterM
       {mode === "real" && POOL_ADDRESS ? (
         <>
           Live on Aevum testnet ({AEVUM_CHAIN_ID}): reads come from QuorumPool at{" "}
-          <a href={explorerAddress(POOL_ADDRESS)} target="_blank" rel="noreferrer" className="font-semibold underline">
+          <a href={explorerAddress(POOL_ADDRESS)} target="_blank" rel="noopener noreferrer" title={POOL_ADDRESS} className="font-semibold underline">
             {shortHex(POOL_ADDRESS)}
           </a>
           , writes go through the gasless relayer.

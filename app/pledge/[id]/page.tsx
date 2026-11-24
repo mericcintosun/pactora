@@ -49,7 +49,7 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
         {campaign.blurb && <p className="mt-4 max-w-[68ch] text-lg leading-relaxed">{campaign.blurb}</p>}
         <p className="mt-4 max-w-[68ch] overflow-x-auto text-sm leading-relaxed text-muted-foreground">
           Pool #{campaign.poolId}. Payments go to{" "}
-          <a className="underline" href={explorerAddress(campaign.seller)} target="_blank" rel="noreferrer">
+          <a className="underline" href={explorerAddress(campaign.seller)} target="_blank" rel="noopener noreferrer" title={campaign.seller}>
             {shortHex(campaign.seller)}
           </a>
           . Every signature names this pool as the only recipient, {formatTusd(campaign.pricePerOrder)} as the only
