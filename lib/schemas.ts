@@ -11,12 +11,24 @@ export const poolIdSchema = z.number().int().min(1).max(1_000_000_000);
 /** Practice mode (seed batches) sets this so the relay answers with a placeholder even when live is configured. */
 const practice = z.boolean().optional();
 
+/**
+ * Optional idempotency key, built by the client from action:poolId:buyer:nonce (hashed,
+ * see lib/wallet-state.ts). A repeated key gets the first outcome back from /api/relay.
+ */
+export const idempotencyKeySchema = z
+  .string()
+  .min(16)
+  .max(80)
+  .regex(/^[A-Za-z0-9:_-]+$/, "Expected letters, digits, colon, dash or underscore.");
+const idempotencyKey = idempotencyKeySchema.optional();
+
 export const pledgeBodySchema = z.object({
   action: z.literal("pledge"),
   poolId: poolIdSchema,
   buyer: addressSchema,
   signature: signatureSchema,
   practice,
+  idempotencyKey,
 });
 
 export const cancelBodySchema = z.object({
@@ -26,12 +38,14 @@ export const cancelBodySchema = z.object({
   nonce: bytes32Schema,
   signature: signatureSchema,
   practice,
+  idempotencyKey,
 });
 
 export const settleBodySchema = z.object({
   action: z.literal("settle"),
   poolId: poolIdSchema,
   practice,
+  idempotencyKey,
 });
 
 export const relayBodySchema = z.discriminatedUnion("action", [pledgeBodySchema, cancelBodySchema, settleBodySchema]);

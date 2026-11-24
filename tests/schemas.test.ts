@@ -32,6 +32,15 @@ test("practice placeholders satisfy the schema", () => {
   assert.equal(relayBodySchema.safeParse(body).success, true);
 });
 
+test("idempotencyKey: optional, 16 to 80 safe characters", () => {
+  const key = "settle-3-0123456789abcdef0123456789abcdef01234567";
+  assert.equal(relayBodySchema.safeParse({ action: "settle", poolId: 3, idempotencyKey: key }).success, true);
+  assert.equal(relayBodySchema.safeParse({ action: "pledge", poolId: 1, buyer, signature, idempotencyKey: key }).success, true);
+  assert.equal(relayBodySchema.safeParse({ action: "settle", poolId: 3, idempotencyKey: "too-short" }).success, false);
+  assert.equal(relayBodySchema.safeParse({ action: "settle", poolId: 3, idempotencyKey: "k".repeat(81) }).success, false);
+  assert.equal(relayBodySchema.safeParse({ action: "settle", poolId: 3, idempotencyKey: "has spaces in the key!!" }).success, false);
+});
+
 test("campaign ids: slugs and pool numbers pass, paths fail", () => {
   assert.equal(campaignIdSchema.safeParse("kavruk-guji").success, true);
   assert.equal(campaignIdSchema.safeParse("12").success, true);
