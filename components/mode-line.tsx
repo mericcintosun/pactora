@@ -18,9 +18,11 @@ export function ModeLine({ mode, fallback = false, className }: { mode: AdapterM
           , writes go through the gasless relayer.
         </>
       ) : fallback ? (
-        "Sample data: Aevum testnet did not answer within 4 seconds, so this page shows seeded batches and practice wallets. Reload to try the chain again."
+        "Sample data: the Aevum testnet read did not come back in time, so this page shows seeded batches and practice wallets. Reload to try the chain again."
+      ) : !POOL_ADDRESS ? (
+        "Sample data: QuorumPool is not deployed on this build yet, so this page shows seeded batches and practice wallets."
       ) : (
-        "Sample data: this page shows seeded batches and practice wallets, not Aevum."
+        "Sample data: live reads are switched off on this build, so this page shows seeded batches and practice wallets."
       )}
     </p>
   );

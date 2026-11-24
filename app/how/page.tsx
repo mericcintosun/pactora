@@ -137,7 +137,7 @@ export default function HowPage() {
           <EmptyState
             className="mt-6"
             title="No QuorumPool on this deploy yet"
-            body="This deploy has no contract address, so every batch runs in practice mode on seed data. The rules above are the same ones the contract enforces."
+            body="QuorumPool is waiting on its redeploy, so every batch here runs in practice mode on sample batches. The rules above are the same ones the contract enforces, and its 14 Foundry tests pass."
             href="/pledge/kavruk-guji"
             cta="Back to the example batch"
           />

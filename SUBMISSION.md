@@ -51,7 +51,7 @@ https://github.com/mericcintosun/pactora
 
 https://pactora-smoky.vercel.app
 
-The live site runs on sample data until the QuorumPool redeploy, and each page says so in its mode line ("Sample data: this page shows seeded batches and practice wallets, not Aevum.").
+The live site runs on sample data until the QuorumPool redeploy, and each page says so in its mode line ("Sample data: QuorumPool is not deployed on this build yet, so this page shows seeded batches and practice wallets.").
 
 ## Proof of QDay infrastructure
 
