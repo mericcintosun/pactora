@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600">
+  <rect width="800" height="600" fill="#f2efe8"/>
+  <g fill="#eae6dc" stroke="#111111" stroke-width="5">
+    <rect x="40" y="70" width="170" height="60"/><rect x="40" y="160" width="170" height="60"/><rect x="40" y="250" width="170" height="60"/>
+    <rect x="40" y="340" width="170" height="60"/><rect x="40" y="430" width="170" height="60"/>
+  </g>
+  <g font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#111111">
+    <text x="58" y="108">SIG 1 · 2.00</text><text x="58" y="198">SIG 2 · 2.00</text><text x="58" y="288">SIG 3 · 2.00</text>
+    <text x="58" y="378">SIG 4 · 2.00</text><text x="58" y="468">SIG 5 · 2.00</text>
+  </g>
+  <g stroke="#111111" stroke-width="5" fill="none">
+    <polyline points="210,100 300,100 380,280"/><polyline points="210,190 300,190 380,280"/><polyline points="210,280 380,280"/>
+    <polyline points="210,370 300,370 380,280"/><polyline points="210,460 300,460 380,280"/>
+  </g>
+  <rect x="380" y="200" width="160" height="160" fill="#111111"/>
+  <text x="404" y="270" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#f2efe8">ONE TX</text>
+  <text x="404" y="306" font-family="Arial, sans-serif" font-size="18" fill="#f2efe8">settle(1)</text>
+  <line x1="540" y1="280" x2="600" y2="280" stroke="#d8261c" stroke-width="10"/>
+  <polygon points="600,262 630,280 600,298" fill="#d8261c"/>
+  <rect x="630" y="190" width="140" height="180" fill="#f2efe8" stroke="#111111" stroke-width="6"/>
+  <rect x="630" y="190" width="140" height="44" fill="#111111"/>
+  <text x="646" y="220" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#f2efe8">MAKER</text>
+  <text x="646" y="300" font-family="Georgia, serif" font-size="40" font-weight="700" fill="#111111">10.00</text>
+  <text x="646" y="334" font-family="Arial, sans-serif" font-size="18" fill="#111111">tUSD8</text>
+  <rect x="40" y="540" width="730" height="6" fill="#111111"/>
+</svg>
