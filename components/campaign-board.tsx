@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useAutoAnimate } from "@formkit/auto-animate/react";
+import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { activePledges } from "@/lib/data/seed";
@@ -81,7 +82,14 @@ export function CampaignBoard({
 
       <ul ref={listRef} className="divide-y-2 divide-foreground">
         {rows.length === 0 && (
-          <li className="px-4 py-8 text-sm">No batches here yet.</li>
+          <li className="p-4">
+            <EmptyState
+              title="No batches here yet"
+              body="Nothing on the board matches this filter. The example batch is open and gathering signatures."
+              href="/pledge/kavruk-guji"
+              cta="Open the example batch"
+            />
+          </li>
         )}
         {rows.map(({ c, signed, needed }) => {
           const pct = Math.min(100, Math.round((signed / c.minOrders) * 100));

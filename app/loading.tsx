@@ -1,7 +1,7 @@
 import { Card, CardBar, CardContent } from "@/components/ui/card";
 
 // Landing placeholder: headline blocks on the left, the board frame on the right.
-export default function Loading() {
+export default function HomeSkeleton() {
   return (
     <div role="status" aria-label="Loading the board" className="mx-auto max-w-6xl px-4 py-12">
       <div className="flex flex-col gap-12 lg:flex-row">

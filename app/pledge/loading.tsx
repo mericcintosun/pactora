@@ -1,7 +1,7 @@
 import { Card, CardBar, CardContent } from "@/components/ui/card";
 
 // Workspace placeholder: the batch form on the left, the board on the right.
-export default function Loading() {
+export default function PledgeSkeleton() {
   return (
     <div role="status" aria-label="Loading the batch desk" className="mx-auto max-w-6xl px-4 py-12">
       <div className="border-b-2 border-foreground pb-6">

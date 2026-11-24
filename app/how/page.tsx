@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { EmptyState } from "@/components/empty-state";
 import { SceneSlot } from "@/components/scene-slot";
 import { Card, CardBar, CardContent } from "@/components/ui/card";
 import { explorerAddress } from "@/lib/aevum";
@@ -97,6 +98,15 @@ domain: { name: "tUSD8", version: "2", chainId: 44005 }`}
             </dl>
           </CardContent>
         </Card>
+        {!POOL_ADDRESS && (
+          <EmptyState
+            className="mt-6"
+            title="No QuorumPool on this deploy yet"
+            body="This deploy has no contract address, so every batch runs in practice mode on seed data. The rules above are the same ones the contract enforces."
+            href="/pledge/kavruk-guji"
+            cta="Back to the example batch"
+          />
+        )}
         <p className="mt-6 max-w-[68ch] leading-relaxed">
           Known constraint: a buyer who empties their wallet after signing would revert the whole settle. The seller can call
           dropPledge on that one buyer and collect from the rest. Ready to try it?{" "}

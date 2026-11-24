@@ -1,7 +1,7 @@
 import { Card, CardBar, CardContent } from "@/components/ui/card";
 
 // Campaign room placeholder: the counter card and the signer list.
-export default function Loading() {
+export default function CampaignRoomSkeleton() {
   return (
     <div role="status" aria-label="Loading the batch" className="mx-auto max-w-6xl px-4 py-12">
       <div className="border-b-2 border-foreground pb-6">
