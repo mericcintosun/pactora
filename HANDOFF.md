@@ -520,3 +520,9 @@ Phase 6, the judge round: run the build, look at `/`, `/pledge`, `/pledge/kavruk
 8. Fill the DoraHacks form from SUBMISSION.md. Fields only a person can fill: the video link, team member names, eligibility and rules confirmation, contact details.
 9. Cold-window stranger test: a private window at phone width, open the live URL, follow "Try it in 60 seconds" in README.md, check that the live, repo and explorer links resolve.
 10. Verify that `/__farm.txt` loads on the live URL.
+
+## QA: external findings
+
+Round 1 crawl of https://pactora-smoky.vercel.app (2026-11-24).
+
+- **Sample-data mode line on `/`, `/pledge`, `/pledge/kavruk-guji`, `/pledge/kavruk-peru-lapsed`, `/pledge/selin-linen-overshirt`, and the empty state on `/how`.** Root cause: not an upstream failure. The deploy has no `NEXT_PUBLIC_CONTRACT_ADDRESS` (QuorumPool still waits on its redeploy, see the banner at the top of this file), so `parseAdapterMode` in `lib/config.ts` returns `fake` and `lib/adapter/index.ts` never attempts a chain read. Evidence: the proof run at 2026-11-24T11:37:49Z reached the RPC fine (`eth_chainId` 213 ms, block 4000072) and printed "QuorumPool: NEXT_PUBLIC_CONTRACT_ADDRESS is not set, so the pool was not read". `contract-tests` passed 14 of 14. This cannot be fixed from code: it needs the deploy step (a funded deployer key and `forge script script/Deploy.s.sol` on 44005), then `NEXT_PUBLIC_CONTRACT_ADDRESS`, `ADAPTER_MODE=real` and `RELAYER_PRIVATE_KEY` on Vercel, then a redeploy. Until then the notice stays, now stating the reason in one calm sentence (`components/mode-line.tsx`, `app/how/page.tsx`). The fallback sentence was also corrected: reads fall back on timeout, RPC failure or parse failure, not only after 4 seconds.
