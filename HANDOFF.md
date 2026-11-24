@@ -47,12 +47,20 @@ Header links: Campaigns (`/pledge`), Live batch (`/pledge/kavruk-guji`), How it 
 
 ### File map
 
-- `lib/data.ts`: types (`Campaign`, `Pledge`) and 10 seed campaigns (Istanbul roaster, Izmir tailor, Kadıköy riso printer, Porto letterpress, Berlin bakery, Ayvalık olive press, Ankara bindery, Austin hot sauce, Lisbon ceramics, Kars felt co-op): 5 open, 3 collected, 2 lapsed. Placeholder hashes are deterministic, not real txs.
+- `lib/types.ts`: shared types (`Campaign`, `Pledge`, `CampaignStatus`, `PledgeState`) and `ApiResponse<T>`.
+- `lib/data/seed.ts`: 11 fixed seed campaigns (Istanbul roaster, Izmir tailor, Kadıköy riso printer, Porto letterpress, Berlin bakery, Ayvalık olive press, Ankara bindery, Austin hot sauce, Lisbon ceramics, Kars felt co-op, plus the lapsed Kavruk Peru lot `kavruk-peru-lapsed` at 3/5): 5 open, 3 collected, 3 lapsed. Also `hexFrom`, `BUYERS`, `DEMO_SIGNERS`, `EXAMPLE_CAMPAIGN_ID`, `LAPSED_EXAMPLE_ID`, `activePledges`, `getSeedCampaign`. Erasable TS only (loaded by `scripts/seed.mjs` with `--experimental-strip-types`). Placeholder hashes are deterministic, not real txs.
+- `lib/format.ts`: `formatTusd`, `formatUtc`, `shortHex`.
+- `lib/adapter/`: `types.ts` (`CampaignAdapter`: list, get, createBatch, pledge, withdraw, collect), `fake.ts` (seed reads, deterministic `hexFrom` tx hashes), `real.ts` (reads delegate to `lib/aevum.ts`; writes throw "Real adapter is implemented in Phase 2"), `index.ts` (`getAdapter()`, real only when `ADAPTER_MODE === "real"`).
+- `app/api/campaigns/route.ts` and `app/api/campaigns/[id]/route.ts`: GET list / one, `ApiResponse<T>` through `getAdapter()`, 404 for unknown ids.
+- `scripts/seed.mjs`: `npm run seed` prints the seed count and a sha256 of `JSON.stringify(campaigns)`; writes nothing.
 - `lib/aevum.ts`: the Aevum integration module. viem chain definition for 44005, QuorumPool ABI, tUSD8 EIP-712 typed data for `ReceiveWithAuthorization` and `CancelAuthorization`, `pledgeNonce`, `getLogsChunked` (1,000 block windows), `loadCampaign` (seed slug or live multicall read), `listCampaigns`.
 - `app/api/relay/route.ts`: real viem wallet client path when `RELAYER_PRIVATE_KEY` and `NEXT_PUBLIC_CONTRACT_ADDRESS` are set (legacy txs); otherwise returns a mock hash with `mode: "mock"`.
 - `components/campaign-board.tsx`: kit signature 1 (see below).
 - `components/campaign-room.tsx`: the live campaign room; motion counter, auto-animated signer list, sign/withdraw/collect, receipt log, lapsed-batch balance comparison.
 - `components/batch-workspace.tsx`: seller form (title, price, minimum, maximum, hours) creating a batch.
+- `components/nav-links.tsx`: client nav links with `usePathname`, `aria-current="page"` and an underline on the active link.
+- `app/loading.tsx`, `app/pledge/loading.tsx`, `app/pledge/[id]/loading.tsx`: pressroom placeholder blocks.
+- `contracts/test/QuorumPool.t.sol`: one test, `test_settleRevertsBelowThreshold`, no forge-std (local `Vm` interface, mock token).
 - `components/site-header.tsx`, `components/brand-mark.tsx`, `components/scene-slot.tsx`, `components/ui/*`: chrome and primitives (sharp, 2px black borders).
 - `contracts/src/QuorumPool.sol`: `createPool`, `pledge`, `withdrawPledge`, `dropPledge`, `settle`, `nonceFor`, `entrantsOf`, `isPledged`. `contracts/script/Deploy.s.sol`, `contracts/script/Smoke.s.sol`, `contracts/README.md`. `contracts/src/App.sol` is leftover template code that nothing deploys; delete it once you touch contracts.
 - Brand: `public/logo.svg`, `app/icon.svg`, `app/opengraph-image.tsx`, `public/illustrations/scene-1..3.svg` (scene 1 and 2 on `/`, scene 3 on `/how`).
@@ -60,7 +68,9 @@ Header links: Campaigns (`/pledge`), Live batch (`/pledge/kavruk-guji`), How it 
 ### Real vs mocked
 
 Real today: the contract, the EIP-712 typed data builders, the relayer's live viem path, the multicall read in `loadCampaign`, `getLogsChunked`.
+Data seam: pages and `/api/campaigns` read only through `getAdapter()`. Default (`ADAPTER_MODE` unset or `fake`) is `lib/adapter/fake.ts` on seed data, so `isLive` never switches pages to RPC reads. `lib/adapter/real.ts` reads via `loadCampaign` / `listCampaigns`; its writes throw until Phase 2.
 Mocked (each marked `TODO: swap mock`):
+- `lib/adapter/fake.ts` entirely, and the write methods of `lib/adapter/real.ts`.
 - `CampaignRoom.join` / withdraw / collect in `components/campaign-room.tsx`: without a deployed pool they sign as the `DEMO_SIGNERS` practice wallets and get mock hashes from the relay.
 - `BatchWorkspace` submit in `components/batch-workspace.tsx`: returns a mock create tx instead of calling `createPool`.
 - `POST /api/relay` mock branch in `app/api/relay/route.ts`.
@@ -118,3 +128,35 @@ Mocked (each marked `TODO: swap mock`):
 - README "Live demo" line correct, Testnet addresses and real tx hashes filled.
 - The 90-second flow works end to end on testnet and with seed data when env is empty.
 - Wow moment rehearsed at least twice with five funded wallets; demo video recorded and linked in the DoraHacks form.
+
+## 6. Phase 1: walking skeleton and demo path
+
+**Goal:** the whole 90-second demo in `DEMO.md` is clickable on seed data with `ADAPTER_MODE=fake`, with no wallet, RPC or key, and five seams in place (typed core and seed, adapter and API stubs, docs, shell states, one contract test). The look is unchanged.
+
+**Status:** all five slices written. Not built, not run: the agent had no shell. One item is open (see Failed attempts): `lib/data.ts` still exists as an empty `export {};` module and must be deleted by the runner.
+
+**Decisions:**
+- `getAdapter()` returns real only for `ADAPTER_MODE === "real"`. The relay's mock branch remains the fake write path used by the UI; adapter write methods exist for API completeness and Phase 2.
+- New seed batch `kavruk-peru-lapsed` (poolId 11, min 5, 2 tUSD8, lapsed at 3/5) is DEMO step 6. `kavruk-guji` is unchanged (3 signed, 1 withdrawn).
+- `CampaignRoom` practice mode: "Count me in" stays available while a practice wallet is free, and "Withdraw my signature" is shown for the last practice signer. Before this the counter stalled at 4/5 because after one sign only Withdraw was offered. This is what makes DEMO step 3 reach 5/5.
+- `CampaignRoom` shows a "Receipt, one transaction" card after Collect (and on seed batches that were collected): the settle hash, one row per transfer, and the total to the seller. This is DEMO step 4.
+- Board empty state text is now "No batches here yet." (it replaces the old sentence instead of adding a second one).
+- `/` uses an absolute title; the layout template is `"%s | Pactora"`. A global `:focus-visible` outline in ACCENT was added to `app/globals.css`.
+- `NEXT_PUBLIC_BRAND_FILES` (read in `lib/brand-files.ts`, set by `next.config.ts`) is now listed in `.env.example` so every `process.env` key is mirrored. It is not a new key.
+- An error message containing "Unlock a browser wallet" was reworded to "Open a browser wallet" (banned word).
+
+**Failed attempts / shortfalls:**
+- `lib/data.ts` could not be deleted (the agent has Write/Edit only, no delete). Its content was replaced with an empty `export {};` and a "DELETE THIS FILE" comment, and nothing imports it. Runner: `git rm lib/data.ts`. It is listed in slice 1 of `.farm-commits.json`.
+
+**Files changed:**
+- Created: `lib/types.ts`, `lib/format.ts`, `lib/data/seed.ts`, `scripts/seed.mjs`, `lib/adapter/{types,fake,real,index}.ts`, `app/api/campaigns/route.ts`, `app/api/campaigns/[id]/route.ts`, `components/nav-links.tsx`, `app/loading.tsx`, `app/pledge/loading.tsx`, `app/pledge/[id]/loading.tsx`, `contracts/test/QuorumPool.t.sol`, `DEMO.md`, `CLAUDE.md`, `.farm-commits.json`.
+- Edited: `package.json` (seed script), `.env.example`, `lib/aevum.ts`, `app/api/relay/route.ts` (import only), `app/page.tsx`, `app/pledge/page.tsx`, `app/pledge/[id]/page.tsx`, `app/how/page.tsx`, `app/layout.tsx`, `app/globals.css`, `app/error.tsx`, `app/not-found.tsx`, `app/opengraph-image.tsx` (comment only), `components/site-header.tsx`, `components/campaign-board.tsx`, `components/campaign-room.tsx`, `components/batch-workspace.tsx`, `README.md`, `HANDOFF.md`.
+- To delete: `lib/data.ts`.
+
+**Commands run:** none, agent has no shell. Runner to run: `npm install`, `npm run build`, `npm run seed` twice (Node 22.6+; on 22.6 itself the `.ts` ESM detection may need Node 22.7+ or newer), `cd contracts && forge build && forge test`.
+
+**Open questions:**
+- None needed a new dependency, route or env key.
+- DEMO step 3 begins at 3/5 (seed: 3 signed, 1 withdrawn), so on seed data the demo shows signatures 4 and 5 plus a withdraw and rejoin, not 1/5 through 5/5. Should Phase 2 or the rehearsal start from a fresh pool at 0/5 for the video?
+
+**Next best step:** Phase 2, swap fake for real behind `lib/adapter/real.ts`. Start with the tUSD8 `receiveWithAuthorization` check (Mission item 1), then the Phase 2 contract suite and the deploy.
