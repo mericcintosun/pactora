@@ -20,6 +20,16 @@ const CONTROLS = [
   { title: "All or nothing", body: "If any single redemption fails inside settle, the whole transaction reverts. Nobody is ever half charged." },
 ];
 
+/** The ReceiveWithAuthorization fields a buyer signs: field, value, what it guarantees. */
+const SIGNED_FIELDS: [string, string, string][] = [
+  ["from", "the buyer", "the only wallet that can be charged"],
+  ["to", "QuorumPool", "only the pool can redeem it"],
+  ["value", "price per order", "fixed at signing"],
+  ["validAfter", "0", "valid from the moment it is signed"],
+  ["validBefore", "batch deadline", "expires on its own"],
+  ["nonce", "keccak256(pool, poolId, buyer, round)", "bound to this pool and this buyer"],
+];
+
 export default function HowPage() {
   const rows: [string, string, string | null][] = [
     ["Network", `Aevum testnet, chain id ${AEVUM_CHAIN_ID}, Shanghai EVM, legacy transactions`, null],
@@ -30,38 +40,63 @@ export default function HowPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-12">
-      <div className="pactora-enter grid gap-10 border-b-2 border-foreground pb-10 md:grid-cols-12">
-        <div className="md:col-span-7">
-          <h1 className="text-4xl font-bold leading-tight sm:text-5xl">The rules live in the signature</h1>
-          <p className="mt-5 max-w-[68ch] text-lg leading-relaxed">
-            Pactora is one Solidity contract, QuorumPool, and one token feature, EIP-3009 receiveWithAuthorization on tUSD8.
-            A buyer signs a message that says: pay this pool exactly this much, before this time, with this nonce. The pool
-            redeems every signature in one transaction once the minimum is met. Below the minimum it redeems none.
-          </p>
-        </div>
-        <div className="border-2 border-foreground md:col-span-5">
-          <SceneSlot
-            n={3}
-            alt="A single transaction drawn as a printing press sheet with five payment lines converging into one total for the maker"
-            width={800}
-            height={600}
-          />
-        </div>
+      <div className="pactora-enter border-b-2 border-foreground pb-10">
+        <h1 className="max-w-4xl text-4xl font-bold leading-tight sm:text-5xl">The rules live in the signature</h1>
+        <p className="mt-5 max-w-[68ch] text-lg leading-relaxed">
+          Pactora is one Solidity contract, QuorumPool, and one token feature, EIP-3009 receiveWithAuthorization on tUSD8.
+          A buyer signs a message that says: pay this pool exactly this much, before this time, with this nonce. The pool
+          redeems every signature in one transaction once the minimum is met. Below the minimum it redeems none.
+        </p>
       </div>
 
-      <section className="pt-14">
-        <h2 className="text-3xl font-bold">What a buyer signs</h2>
-        <pre className="mt-5 overflow-x-auto border-2 border-foreground bg-card p-5 text-sm leading-relaxed">
-{`ReceiveWithAuthorization {
-  from:        <buyer>
-  to:          <QuorumPool>         only the pool can redeem
-  value:       price per order      fixed at signing
-  validAfter:  0
-  validBefore: batch deadline       expires on its own
-  nonce:       keccak256(pool, poolId, buyer, round)
-}
-domain: { name: "tUSD8", version: "2", chainId: 44005 }`}
-        </pre>
+      <section aria-labelledby="two-steps" className="pt-14">
+        <h2 id="two-steps" className="text-3xl font-bold">Two steps, one transaction</h2>
+        <div className="mt-6 grid border-2 border-foreground md:grid-cols-12">
+          <article className="border-b-2 border-foreground md:col-span-5 md:border-b-0 md:border-r-2">
+            <p className="bg-foreground px-4 py-2 text-xs font-semibold uppercase tracking-widest text-background">Step one: sign</p>
+            <div className="space-y-4 p-5">
+              <SceneSlot n={2}
+                alt="A buyer's phone showing one typed-data signature for 2 tUSD8 addressed to the pool, with the wallet balance unchanged underneath"
+                width={600}
+                height={600}
+              />
+              <p className="max-w-[60ch] leading-relaxed">
+                The buyer signs one message. No gas, no approval, and the balance stays where it is. The relayer posts the
+                signature to QuorumPool.
+              </p>
+            </div>
+          </article>
+          <article className="md:col-span-7">
+            <p className="bg-foreground px-4 py-2 text-xs font-semibold uppercase tracking-widest text-background">Step two: settle</p>
+            <div className="space-y-4 p-5">
+              <SceneSlot n={3}
+                alt="Five signed payments of 2 tUSD8 drawn as press slugs, joined into one settle transaction that sends 10 tUSD8 to the maker"
+                width={800}
+                height={600}
+              />
+              <p className="max-w-[60ch] leading-relaxed">
+                At the minimum, anyone presses collect. settle redeems every signature in the same transaction and forwards the
+                total to the seller. One failed redemption reverts all of them.
+              </p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section aria-labelledby="what-signed" className="pt-14">
+        <h2 id="what-signed" className="text-3xl font-bold">What a buyer signs</h2>
+        <p className="mt-3 max-w-[68ch] leading-relaxed">
+          ReceiveWithAuthorization, EIP-712 domain name tUSD8, version 2, chain id {AEVUM_CHAIN_ID}.
+        </p>
+        <dl className="mt-5 divide-y-2 divide-foreground border-2 border-foreground text-sm">
+          {SIGNED_FIELDS.map(([field, value, note]) => (
+            <div key={field} className="grid grid-cols-1 gap-1 px-5 py-3 md:grid-cols-[10rem_minmax(0,1fr)_minmax(0,1fr)] md:gap-4">
+              <dt className="text-xs font-semibold uppercase tracking-widest">{field}</dt>
+              <dd className="break-words font-semibold">{value}</dd>
+              <dd className="text-muted-foreground">{note}</dd>
+            </div>
+          ))}
+        </dl>
       </section>
 
       <section className="pt-14">

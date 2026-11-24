@@ -24,7 +24,7 @@ export default async function PledgeWorkspace({ searchParams }: { searchParams: 
     <div className="mx-auto max-w-6xl px-4 py-12">
       <div className="pactora-enter border-b-2 border-foreground pb-6">
         <h1 className="text-4xl font-bold sm:text-5xl">The batch desk</h1>
-        <p className="mt-2 text-sm font-semibold uppercase tracking-widest">Open a batch, then sort the board below by need, deadline or price</p>
+        <p className="mt-2 text-sm font-semibold uppercase tracking-widest">Open a batch, sort the board by need, deadline or price, preview any room</p>
         <p className="mt-3 max-w-[68ch] text-lg leading-relaxed">
           {seed
             ? `${seed.makerPerson}'s numbers are loaded: ${seed.minOrders} orders at ${seed.pricePerOrder} tUSD8, open for 24 hours. Press Open batch to see what a seller sees.`
