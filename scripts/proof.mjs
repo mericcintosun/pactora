@@ -246,6 +246,47 @@ function proofForge() {
   };
 }
 
+// The adapter-backed reads behind DEMO.md steps 1 to 4 and 6, timed against the deployed
+// site (NEXT_PUBLIC_SITE_URL). Each GET goes through readCampaignList / readCampaign in
+// lib/adapter/index.ts, so the time includes the live multicall or the seed fallback.
+const DEMO_BUDGET_MS = 5_000;
+
+async function timedGet(url) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), CALL_TIMEOUT_MS);
+  const t0 = Date.now();
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, headers: { accept: "application/json" } });
+    const json = await res.json().catch(() => null);
+    return { ms: Date.now() - t0, status: res.status, json };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function proofDemoPath() {
+  const base = (ENV.NEXT_PUBLIC_SITE_URL || "https://pactora.vercel.app").replace(/\/$/, "");
+  const lines = [`- Site \`${base}\`, budget ${DEMO_BUDGET_MS} ms per step`];
+  const parts = [];
+  for (const path of ["/api/campaigns", "/api/campaigns/kavruk-guji"]) {
+    let r;
+    try {
+      r = await timedGet(`${base}${path}`);
+    } catch (err) {
+      const why = err?.name === "AbortError" ? `no answer within ${CALL_TIMEOUT_MS} ms` : err?.message || "request failed";
+      lines.push(`- \`GET ${path}\`: Not run in this build: ${why}.`);
+      parts.push(`${path}=not run`);
+      continue;
+    }
+    const ok = r.json && r.json.ok === true;
+    const size = ok ? (Array.isArray(r.json.data) ? `${r.json.data.length} batches` : `batch ${r.json.data.id}`) : `error ${r.json?.error ?? "unknown"}`;
+    const verdict = r.ms <= DEMO_BUDGET_MS ? "within budget" : "OVER the 5 s budget";
+    lines.push(`- \`GET ${path}\`: HTTP ${r.status}, ${r.ms} ms, mode ${ok ? r.json.mode : "?"}, ${size}, ${verdict}`);
+    parts.push(`${path}=${r.ms}ms`);
+  }
+  return { body: lines.join("\n"), summary: `demo-path: ${parts.join(" ")}` };
+}
+
 // ------------------------------------------------------------------- README I/O
 
 function upsert(readme, name, body) {
@@ -276,6 +317,7 @@ async function main() {
     ["tusd8-capabilities", await guarded("tusd8-capabilities", proofTusd8)],
     ["chain-latency", await guarded("chain-latency", proofLatency)],
     ["contract-tests", await guarded("contract-tests", async () => proofForge())],
+    ["demo-path", await guarded("demo-path", proofDemoPath)],
   ];
   const stamp = new Date().toISOString().replace(/\.\d+Z$/, "Z");
   let readme = existsSync(README) ? readFileSync(README, "utf8") : "# Pactora\n";

@@ -214,3 +214,90 @@ Mocked (each marked `TODO: swap mock`):
 - `submitCreatePool` makes the relayer the seller. Phase 3 should either have sellers call `createPool` from their own wallet (the drafted branch in `batch-workspace.tsx`) or add a seller argument to the contract.
 
 **Next best step:** Phase 3, wallet and transaction lifecycle UX: recognise the connected wallet as a signer on load, pending, mined and failed states per action, `router.refresh` after each live write, persistence-free state, and `demo:reset`.
+
+## 8. Phase 3: demo path on the real flow, wallet states and reset
+
+**Goal:** every DEMO.md step runs on the real flow, with the fake adapter as a fallback in code; steps 2, 3 and 4 show honest wallet and transaction states and survive a refresh in live mode; "reset, seed, demo" is repeatable.
+
+**Status:** all five slices written. Nothing was built, tested or run (see Commands run). Every acceptance item below that needs a command is unverified.
+
+### Decisions
+
+**Persistence (chosen rows):**
+- "Step's proof IS the chain": QuorumPool plus `lib/config.ts`, no mirror database. Live pages re-read the pool from the chain on every render (`revalidate = 5`) and after each live write (`router.refresh()` plus `revalidatePath` in the relay).
+- "Steps only read seeded data": `lib/data/seed.ts` for fake mode and for the seed slugs in every mode.
+- Rejected: KV blob (practice state is per session and must reset on reload), Postgres (nothing relational is filtered or joined).
+- So there is no `lib/store.ts`, no store env var, no schema and no migration. Migrations are not applicable: there is nothing stored outside the chain and the seed constants.
+
+**Fallback per DEMO.md step (real path file / fallback file):**
+
+| Step | Real path | Fallback in code |
+| --- | --- | --- |
+| 1 `/` | `app/page.tsx` to `readCampaignList` (`lib/adapter/index.ts`) to `lib/adapter/real.ts` to `fetchCampaignList` (`lib/aevum.ts`) | `FALLBACK` block in `lib/adapter/index.ts` serves `lib/adapter/fake.ts` `list()`; `ModeLine` prints the fallback sample sentence |
+| 2 `/pledge?example=kavruk-guji` | `components/batch-workspace.tsx` `createLive` (seller wallet `createPool`, legacy gas price, receipt gives the pool id) | `createPractice` in the same file when not live; a live failure renders `tx-failed` with retry. Board and example read use the same `FALLBACK` |
+| 3 `/pledge/[id]` sign and withdraw | `components/campaign-room.tsx` `join` / `withdraw` to `app/api/relay/route.ts` to `lib/relayer.ts` `submitPledge` / `submitCancel` | Seed slug resolves first in `fetchCampaign` (`lib/aevum.ts`, `getSeedCampaign` is the first lookup); practice writes go through the relay's mock branch; live relay failures render `tx-failed`, never a mock hash |
+| 4 `/pledge/[id]` collect | `campaign-room.tsx` `collect` to `submitSettle` | Practice settle through the mock branch; live failure renders `tx-failed` |
+| 5 `/how` | `app/how/page.tsx` with `POOL_ADDRESS` from `lib/config.ts` | `EmptyState` when the address is not configured |
+| 6 `/pledge/kavruk-peru-lapsed` | `app/pledge/[id]/page.tsx` to `readCampaign` (seed slug, no RPC in any mode) | Same record from `lib/adapter/fake.ts` |
+
+**Fallback mechanics:** `withFallback` in `lib/adapter/index.ts` caps a live page read at `PAGE_READ_BUDGET_MS` (4 s, `lib/config.ts`) and falls back on `upstream_timeout`, `upstream_error` or `parse_failure`. Log history on a live pool page gets `HISTORY_BUDGET_MS` (2.5 s) and is dropped past that, so the pool itself still renders. A live pool id that falls back has no seed twin, so `/pledge/[id]` throws to its `ErrorState` boundary (retry) instead of a 404, and `/api/campaigns/[id]` answers `upstream_timeout`. Real reads are now strict (`fetchCampaign`, `fetchCampaignList`); `loadCampaign` / `listCampaigns` remain as lenient wrappers.
+
+**Relay change:** the mock branch now runs only for `practice: true`. A live request on a deploy without a relayer key answers `not_configured` (before it silently answered a mock hash). Every current client sends `practice: true` on practice calls, so no existing call breaks.
+
+**Idempotency scope:** `IDEMPOTENCY` section in `app/api/relay/route.ts`: `inFlight` (`Map<string, Promise<RelayResult | ApiError>>`) joins concurrent duplicates; `settledResults` replays a successful outcome for 10 minutes (max 500 entries). Failures are not cached, so "Try again" with the same key really retries. Per server instance only; the contract is the backstop (`NonceUsed`, `AlreadyPledged`, `PoolClosed` through `REVERT_HINTS`). Keys come from `idempotencyKey()` in `lib/wallet-state.ts`: `action:poolId:buyer:nonce` hashed to `<action>-<poolId>-<40 hex>` so it fits 16 to 80 characters (a raw bytes32 nonce alone is 66). Live pledge and cancel use the on-chain nonce, live settle uses a fixed nonce per pool, practice uses a per-click counter.
+
+**Wallet states:** `lib/wallet-state.ts` `WalletState` (8 kinds), `classifyError`, `failureState`, `isBusy`, `TxError`, and the single `injected()` lookup (removed from `campaign-room.tsx` and `batch-workspace.tsx`). Practice mode is the prefunded demo account for DEMO.md: state starts at `idle` with `DEMO_SIGNERS[0]` as the connected account and `practice: true`, so no wallet, faucet or login screen appears on the demo path. The injected wallet is used only in live mode. Collect does not need a wallet (the relayer pays), so it never prompts a connect.
+
+**Returning signer:** in live mode `mine` is derived during render from the connected account and `campaign.pledges` (props from the server read), so withdraw works after a reload. After `router.refresh()` the room adopts the new `campaign` prop during render (no effect, no client fetch).
+
+**Seller path:** the relayer-as-seller path (`submitCreatePool`, real adapter `createBatch`, `demo:reset`) is kept. The batch desk's live path uses the seller's own wallet (`createLive`). A contract-level seller argument stays out of scope.
+
+### Route to state-triad files
+
+| Route | Skeleton | ErrorState (Try again bound to `reset`) | EmptyState (Link CTA) |
+| --- | --- | --- | --- |
+| `/` | `app/loading.tsx` `HomeSkeleton` | `app/error.tsx` | `components/campaign-board.tsx` (filter with no rows, CTA `/pledge/kavruk-guji`) |
+| `/pledge` | `app/pledge/loading.tsx` `PledgeSkeleton` | `app/pledge/error.tsx` | `app/pledge/page.tsx` (empty list) and the board |
+| `/pledge/[id]` | `app/pledge/[id]/loading.tsx` `CampaignRoomSkeleton` | `app/pledge/[id]/error.tsx`; in-room failures render `ErrorState` through `WalletBar` `tx-failed` | `components/campaign-room.tsx` (zero signatures, CTA "Count me in" to `#sign`) |
+| `/how` | `app/how/loading.tsx` `HowSkeleton` | `app/how/error.tsx` | `app/how/page.tsx` (no contract address, CTA `/pledge/kavruk-guji`) |
+
+### Failed attempts
+
+None. No error was seen twice because nothing could be run.
+
+### Files changed
+
+- Created: `lib/wallet-state.ts`, `components/wallet-bar.tsx`, `components/error-state.tsx`, `components/empty-state.tsx`, `app/how/loading.tsx`, `app/pledge/error.tsx`, `app/pledge/[id]/error.tsx`, `app/how/error.tsx`, `scripts/demo-reset.mjs`, `.farm-commits.json`.
+- Edited: `components/campaign-room.tsx`, `components/batch-workspace.tsx`, `components/campaign-board.tsx`, `components/mode-line.tsx`, `components/scene-slot.tsx`, `components/brand-mark.tsx`, `lib/schemas.ts`, `lib/adapter/index.ts`, `lib/adapter/real.ts`, `lib/aevum.ts`, `lib/http.ts`, `lib/config.ts` (two constants, no env key), `app/api/relay/route.ts`, `app/api/campaigns/route.ts`, `app/api/campaigns/[id]/route.ts`, `app/page.tsx`, `app/pledge/page.tsx`, `app/pledge/[id]/page.tsx`, `app/how/page.tsx`, `app/error.tsx`, `app/loading.tsx`, `app/pledge/loading.tsx`, `app/pledge/[id]/loading.tsx`, `tests/schemas.test.ts`, `scripts/proof.mjs`, `package.json` (`demo:reset` script only), `README.md`, `CLAUDE.md`, `HANDOFF.md`.
+- Not touched: `contracts/`, `.env.example` (no new key; `RELAYER_PRIVATE_KEY` has no `NEXT_PUBLIC_` prefix, line 532 of the old file), `.farm-live.json`, `lib/data/seed.ts`, `lib/relayer.ts`.
+
+### Commands run
+
+None built, tested or executed. The agent cannot run commands. At session start a read-only `cat`/`ls` was used to load the context files; nothing else.
+
+Runner: `npm install`, `npm run build`, `npm test`, `npm run demo:reset` three times, `npm run proof`. If `lib/data.ts` still exists, `git rm lib/data.ts`.
+
+### Unverified (needs a command)
+
+- TypeScript: highest-risk spots are `classifyError` in `lib/wallet-state.ts` (uses `UserRejectedRequestError.code`, a static on the viem class; if the build rejects it, compare with the literal `4001`), `createLive` in `components/batch-workspace.tsx` (`writeContract` with a JSON-RPC `account` plus `gasPrice`), and the render-time prop sync in `CampaignRoom` (`synced !== campaign`). The two Phase 2 viem spots in `lib/aevum.ts` are unchanged.
+- `scripts/demo-reset.mjs` loads the seed a second time as `../lib/data/seed.ts?demo-reset=2`. If Node's strip-types loader refuses the query string, the script says so and hashes the same instance twice (the check is then weaker but still runs).
+- `next/image` with `unoptimized` on SVGs in `SceneSlot` and `BrandMark`: confirm the header mark and the three scenes render at the same size as before.
+- `revalidatePath` inside the relay route after a live write: confirm `/pledge/<poolId>` shows the new count after `router.refresh()`.
+
+### Unmet or partial spec items
+
+- Spec asked that a failed in-room action re-send "with the same idempotency key". Live pledge and cancel keys are derived from the on-chain nonce, so a retry reuses the key; but if the first sign step failed before a signature existed, the retry asks the wallet to sign again (same key, new signature). `components/campaign-room.tsx` `join`.
+- The relay replays only successful outcomes for a repeated key; a repeated key after a failure re-runs. This is a deliberate reading of "returns the first outcome" so that retry works. `app/api/relay/route.ts` `onceFor`.
+- The double-hyphen tripwire still matches the Mermaid edges in `README.md` lines 33 to 39 (Phase 1 exception).
+- `proof.mjs` `demo-path` times the deployed API at `NEXT_PUBLIC_SITE_URL` (default https://pactora.vercel.app), not a local server, because plain Node cannot import the TypeScript adapter. Until the runner runs `npm run proof` the README block holds an honest "Not run" line.
+
+### Open questions
+
+- No new dependency, no new env key, no new page route. The `relayBodySchema` change only adds an optional field.
+- Seller wallet `createPool`: the batch desk's live path uses the seller's wallet, while the relayer opens the demo pools (`demo:reset`) and is their seller. Should the contract take a seller argument so the relayer can open pools for a seller? Conservative answer taken: no contract change.
+- Funding is a human task, once per address per 24 h: deployer about 1 tQDAY, relayer about 2 tQDAY, 5 demo wallets with at least 4 tUSD8 each, from https://faucet.qday.info/en or Discord `/faucet <address>`.
+- ISR: `/pledge/[id]` keeps `revalidate = 5`. The relay calls `revalidatePath` after each live write so `router.refresh()` should get a fresh read; if it does not on Vercel, the count can lag by up to 5 s.
+
+### Next best step
+
+Phase 4: landing, OG image and a security pass (relay abuse limits, header review), then kit signatures 2 and 3 in Phase 5.

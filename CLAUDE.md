@@ -17,7 +17,9 @@ cd contracts && forge build && forge test
 ## Layout
 
 - `lib/types.ts` shared types and `ApiResponse<T>`; `lib/data/seed.ts` fixed seed (erasable TS only); `lib/format.ts` formatters.
-- `lib/adapter/` the data seam: `getAdapter()` returns fake unless `ADAPTER_MODE` is exactly `real`. Pages and `/api/campaigns` read through it.
+- `lib/adapter/` the data seam: `getAdapter()` returns fake unless `ADAPTER_MODE` is exactly `real`. Pages and `/api/campaigns` read through `readCampaignList` / `readCampaign`, which fall back to seed data when a live read fails (the `FALLBACK` block in `lib/adapter/index.ts`).
+- `lib/wallet-state.ts` the eight wallet states, `classifyError` and the one `injected()` lookup; `components/wallet-bar.tsx` renders them.
+- `npm run demo:reset` checks seed determinism and, with the relayer key set, opens a fresh live pool.
 - `lib/aevum.ts` chain config, ABIs, EIP-712 builders, live reads. `app/api/relay/route.ts` gasless relayer (mock hash when unconfigured).
 
 ## Stack pitfalls
