@@ -160,3 +160,57 @@ Mocked (each marked `TODO: swap mock`):
 - DEMO step 3 begins at 3/5 (seed: 3 signed, 1 withdrawn), so on seed data the demo shows signatures 4 and 5 plus a withdraw and rejoin, not 1/5 through 5/5. Should Phase 2 or the rehearsal start from a fresh pool at 0/5 for the video?
 
 **Next best step:** Phase 2, swap fake for real behind `lib/adapter/real.ts`. Start with the tUSD8 `receiveWithAuthorization` check (Mission item 1), then the Phase 2 contract suite and the deploy.
+
+## 7. Phase 2: QuorumPool settle goes real on Aevum
+
+**Goal:** DEMO step 4 ("Collect all payments") calls `QuorumPool.settle` on Aevum 44005 through the server relayer, and step 3 (`pledge`, `withdrawPledge`) uses the same path. Steps 1, 2, 5 and 6 stay on seed data or practice mode. `ADAPTER_MODE` unset or `fake` still plays all six steps.
+
+**Status:** all five slices written. Nothing was built, tested or run: the agent had Read, Write, Edit, Glob and Grep only. Settle and pledge/withdraw are wired to the live relayer for numeric pool ids when the real adapter is on.
+
+**What went real (code written, not yet exercised on chain):**
+- `lib/relayer.ts`: `submitPledge` (pre-checks `isPledged`, `nonceFor`, then `authorizationState`, refuses duplicates), `submitCancel` (`cancelAuthorization` on tUSD8 unless already used, then `withdrawPledge`), `submitSettle` (decodes the receipt's tUSD8 `Transfer` logs and `Settled` total), `submitCreatePool`. Legacy `gasPrice`, `waitForTransactionReceipt`, every call through `withTimeoutAndRetry`.
+- `app/api/relay/route.ts`: `relayBodySchema.safeParse` first, then the rate limit, then the practice/mock branch, then the live branch. Every failure is `{ error, hint }`.
+- `lib/aevum.ts` `loadCampaign`: per-buyer `isPledged` and tUSD8 `balanceOf` in one multicall, sign times plus `createTx` / `settleTx` from `PoolCreated`, `Pledged`, `Settled` logs via `getLogsChunked`. `listCampaigns` adds the 6 newest live pools to the board.
+- `components/campaign-room.tsx`: on a numeric id with `mode === "real"`, "Count me in" signs `ReceiveWithAuthorization` in the injected wallet and posts to `/api/relay`; "Collect all payments" posts `settle` and renders the returned hash, the decoded transfer rows and the seller total.
+
+**Still fixtures or practice:** the 11 seed batches (always practice, even in real mode), the seller form's practice path in `components/batch-workspace.tsx` (its drafted seller-wallet `createPool` branch is kept but routes nowhere live yet), the relay's mock branch (practice flag or no relayer key), `lib/adapter/fake.ts` entirely.
+
+**Env the runner must fill:** `RELAYER_PRIVATE_KEY` (secret, server only, listed in `.farm-live.json`) and `NEXT_PUBLIC_CONTRACT_ADDRESS` (written by the deploy step). The real adapter turns on only with `ADAPTER_MODE=real` **and** `NEXT_PUBLIC_CONTRACT_ADDRESS`. Contract scripts read `PRIVATE_KEY` (`vm.envUint`, from `FARM_EVM_PRIVATE_KEY`), `TUSD8_ADDRESS` (optional, `vm.envOr`) and `DEPLOYED_CONTRACT` (`vm.envAddress`, the deployed pool address); sources are in `contracts/README.md`.
+
+**Decisions:**
+- Relay bodies carry an optional `practice: true`. Seed pages always send it, so practice mode keeps answering `mode: "mock"` even on a deploy where the live relayer is configured. Practice sends schema-valid zero values (`PRACTICE_SIGNATURE`, `PRACTICE_NONCE` in `lib/schemas.ts`), so validation stays strict (65-byte signature, 32-byte nonce).
+- `ADAPTER_MODE` is read only in `lib/adapter/index.ts`; the rule ("real" plus a pool address) lives in `parseAdapterMode` in `lib/config.ts`. `RELAYER_PRIVATE_KEY` is read only in `lib/relayer.ts` (`readKey`, lazily, per call).
+- Pages pass `getAdapter().mode` to `CampaignRoom` and `BatchWorkspace` as a prop; the old `isLive` export is gone. `ModeLine` (`components/mode-line.tsx`, server component) prints the sample or live sentence on `/`, `/pledge` and `/pledge/[id]`.
+- `withTimeoutAndRetry` does not retry contract reverts. Writes are retried once on timeout; a duplicate send would revert at gas estimation because the pool already holds the pledge or is settled. viem's own transport retries are set to 0 so the retry count stays exactly 1.
+- `/pledge/[id]` has `revalidate = 5` and `/` has `revalidate = 30`, so live pools are not frozen at build time.
+- Contract: `settle` computes `total = orders * price` in the effects block (equal to the per-redemption sum because `activeCount` counts exactly the active entrants). The `NotPledged` check moved out of `_deactivate` into `dropPledge` and `withdrawPledge`, so each body reads checks, effects, interactions. The entrant cap check in `pledge` moved before the signature recovery.
+- `tests/` is excluded in `tsconfig.json` because `tests/schemas.test.ts` imports `../lib/schemas.ts` with its extension (needed by `node --experimental-strip-types`).
+- `/api/campaigns/[id]` validates the id with `campaignIdSchema`; unknown ids answer 404 with `error: "invalid_input"` (the union has no `not_found` code).
+
+**Failed attempts:** none. No error was seen twice because nothing could be run.
+
+**Files changed:**
+- Created: `contracts/test/MockTUSD8.sol`, `lib/config.ts`, `lib/errors.ts`, `lib/schemas.ts`, `lib/log.ts`, `lib/http.ts`, `lib/relayer.ts`, `components/mode-line.tsx`, `scripts/proof.mjs`, `tests/schemas.test.ts`, `.farm-live.json`, `.farm-commits.json`.
+- Edited: `contracts/src/QuorumPool.sol`, `contracts/test/QuorumPool.t.sol`, `contracts/README.md`, `lib/aevum.ts`, `lib/types.ts`, `lib/adapter/{types,fake,real,index}.ts`, `app/api/relay/route.ts`, `app/api/campaigns/route.ts`, `app/api/campaigns/[id]/route.ts`, `app/page.tsx`, `app/pledge/page.tsx`, `app/pledge/[id]/page.tsx`, `app/how/page.tsx`, `components/campaign-room.tsx`, `components/batch-workspace.tsx`, `package.json`, `.env.example`, `tsconfig.json`, `README.md`, `HANDOFF.md`.
+- Unchanged on purpose: `contracts/script/Deploy.s.sol`, `contracts/script/Smoke.s.sol` (Smoke already reads `vm.envAddress("DEPLOYED_CONTRACT")` and makes one `createPool` call), `components/campaign-board.tsx`, `lib/data/seed.ts`.
+
+**Commands run:** none. Runner: `npm install`, `npm run build`, `git rm lib/data.ts` if still present, then `npm run proof`. Human: `npm run test:contracts`, `npm test`.
+
+**Unverified (needs a command):**
+- TypeScript: two viem typing spots carry the most risk. `lib/aevum.ts` `readLivePool` passes a dynamic `ContractFunctionParameters[]` to `multicall` and casts the result to `unknown[]`; `lib/aevum.ts` `readHistory` reads `l.args.poolId` on the union from `parseEventLogs`. If the build rejects either, split the per-buyer multicall into two homogeneous ones and cast `l.args` to `{ poolId: bigint }`.
+- Forge: the suite has never been compiled. `MockTUSD8` deliberately does not inherit `IERC3009Token`; the pool receives `IERC3009Token(address(token))`.
+- On chain: whether tUSD8 really exposes `receiveWithAuthorization` and the `{ name: "tUSD8", version: "2" }` domain. Read the `tusd8-capabilities` Proof block in README first.
+- Unmet acceptance item, by design: the double-hyphen tripwire matches the Mermaid edges in README.md lines 33 to 39 (Phase 1 text; Mermaid edge syntax needs the double hyphen). The banned-word hit on HANDOFF.md line 119 is the Phase 1 rule that lists those words.
+
+**Manual checklist (human, before the live spot check):**
+- Fund from https://faucet.qday.info/en or Discord `/faucet <address>` (once per address per 24 h): deployer about 1 tQDAY, relayer about 2 tQDAY, 5 demo wallets with at least 4 tUSD8 each (gas is not needed for buyers).
+- Press the farm's deploy step, then set `RELAYER_PRIVATE_KEY` and `ADAPTER_MODE=real` on Vercel.
+- Open a live pool (Smoke opens one with min 5 at 2 tUSD8 for 24 h, seller = deployer), go to `/pledge/<poolId>`, sign from five wallets, press Collect, open the settle tx on https://explorer-test.qday.info.
+- Phase 1 question still open: should the video start a fresh pool at 0/5? A live pool from Smoke does start at 0/5; the seed batch `kavruk-guji` starts at 3/5.
+
+**Open questions:**
+- No new dependency beyond the pre-approved `zod`, no new env key, no new route.
+- Live withdraw needs the same browser session that signed (`mine` is set on sign). Recognising a returning signer from the connected wallet is Phase 3 wallet UX.
+- `submitCreatePool` makes the relayer the seller. Phase 3 should either have sellers call `createPool` from their own wallet (the drafted branch in `batch-workspace.tsx`) or add a seller argument to the contract.
+
+**Next best step:** Phase 3, wallet and transaction lifecycle UX: recognise the connected wallet as a signer on load, pending, mined and failed states per action, `router.refresh` after each live write, persistence-free state, and `demo:reset`.
