@@ -2,7 +2,7 @@
 
 Pactora is pre-orders for small makers. Buyers only sign. When enough orders arrive, every payment is collected in one transaction; if they don't, nobody's money ever moves. Built with Next.js 15, Tailwind CSS v4, viem 2 and a Foundry-tested Solidity contract on Aevum testnet with tUSD8.
 
-> Live demo: https://pactora.vercel.app
+> Live demo: https://pactora-smoky.vercel.app
 
 ## The problem
 
