@@ -7,7 +7,7 @@ import { NextResponse } from "next/server";
 import { createWalletClient, http, isAddress, isHex, parseSignature, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { aevumTestnet, AEVUM_RPC, POOL_ADDRESS, publicClient, quorumPoolAbi, TUSD8_ADDRESS, tusd8Abi } from "@/lib/aevum";
-import { hexFrom } from "@/lib/data";
+import { hexFrom } from "@/lib/data/seed";
 
 export const runtime = "nodejs";
 

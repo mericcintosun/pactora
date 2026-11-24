@@ -8,7 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBar, CardContent, CardFooter } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 import { aevumTestnet, explorerTx, isLive, POOL_ADDRESS, quorumPoolAbi, TUSD8_DECIMALS } from "@/lib/aevum";
-import { hexFrom, shortHex, type Campaign } from "@/lib/data";
+import { hexFrom } from "@/lib/data/seed";
+import { shortHex } from "@/lib/format";
+import type { Campaign } from "@/lib/types";
 
 export interface BatchDraft {
   product: string;
@@ -128,7 +130,7 @@ export function BatchWorkspace({ campaigns, initial }: { campaigns: Campaign[]; 
               </p>
             )}
             {result.kind === "done" && (
-              <div role="status" className="border-2 border-ok px-3 py-2 text-sm">
+              <div role="status" className="overflow-x-auto border-2 border-ok px-3 py-2 text-sm">
                 <p className="font-semibold text-ok">Batch opened.</p>
                 {result.mock ? (
                   <p>Practice hash {shortHex(result.tx)}. It sits at the top of the board below.</p>

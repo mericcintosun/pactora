@@ -1,6 +1,8 @@
 // Aevum testnet + tUSD8 integration. One module, two paths:
 //   live: NEXT_PUBLIC_CONTRACT_ADDRESS is set, reads come from QuorumPool on chain 44005
-//   mock: no address, the same functions return the seed campaigns from lib/data.ts
+//   mock: no address, the same functions return the seed campaigns from lib/data/seed.ts
+// Pages never call loadCampaign / listCampaigns directly: they go through
+// getAdapter() in lib/adapter, and only the real adapter delegates here.
 import {
   createPublicClient,
   defineChain,
@@ -11,7 +13,8 @@ import {
   type Address,
   type Hex,
 } from "viem";
-import { campaigns, getSeedCampaign, type Campaign } from "@/lib/data";
+import { campaigns, getSeedCampaign } from "@/lib/data/seed";
+import type { Campaign } from "@/lib/types";
 
 export const AEVUM_CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 44005);
 export const AEVUM_RPC = process.env.NEXT_PUBLIC_AEVUM_RPC ?? "https://rpc-test.qday.info";
@@ -149,7 +152,7 @@ export async function getLogsChunked<T>(
 }
 
 /**
- * Load a campaign by its page id. Seed slugs always resolve from lib/data.ts.
+ * Load a campaign by its page id. Seed slugs always resolve from lib/data/seed.ts.
  * Numeric ids resolve from QuorumPool when the contract address is configured.
  */
 export async function loadCampaign(id: string): Promise<Campaign | null> {
