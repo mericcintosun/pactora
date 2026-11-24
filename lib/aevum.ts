@@ -23,6 +23,7 @@ import {
   AEVUM_RPC,
   CALL_TIMEOUT_MS,
   EXPLORER_URL,
+  HISTORY_BUDGET_MS,
   LIVE_POOLS_ON_BOARD,
   LOG_LOOKBACK_BLOCKS,
   MULTICALL3,
@@ -30,7 +31,7 @@ import {
   TUSD8_ADDRESS,
   TUSD8_DECIMALS,
 } from "./config";
-import { withTimeoutAndRetry } from "./http";
+import { withBudget, withTimeoutAndRetry } from "./http";
 import { shortHex } from "./format";
 
 export {
@@ -306,7 +307,8 @@ async function readLivePool(poolId: bigint, withHistory: boolean): Promise<Campa
     ? ((await withTimeoutAndRetry(() => publicClient.multicall({ allowFailure: false, contracts: calls }))) as unknown as unknown[])
     : [];
 
-  const history = withHistory ? await readHistory(poolId).catch(() => null) : null;
+  // History is optional: past HISTORY_BUDGET_MS the page renders without sign times.
+  const history = withHistory ? await withBudget(readHistory(poolId), HISTORY_BUDGET_MS).catch(() => null) : null;
 
   const deadlineIso = new Date(Number(deadline) * 1000).toISOString();
   const closed = Number(deadline) * 1000 <= Date.now();
@@ -348,32 +350,36 @@ async function readLivePool(poolId: bigint, withHistory: boolean): Promise<Campa
 }
 
 /**
- * Load a campaign by its page id. Seed slugs always resolve from lib/data/seed.ts.
- * Numeric ids resolve from QuorumPool when the contract address is configured.
+ * Strict read of one campaign by its page id. Seed slugs ("kavruk-guji",
+ * "kavruk-peru-lapsed", ...) always resolve from lib/data/seed.ts first, with no RPC.
+ * Numeric ids resolve from QuorumPool. Returns null when the pool does not exist;
+ * throws a CallError when Aevum does not answer, so lib/adapter/index.ts can fall back.
  */
-export async function loadCampaign(id: string): Promise<Campaign | null> {
+export async function fetchCampaign(id: string): Promise<Campaign | null> {
   const seed = getSeedCampaign(id);
   if (seed) return seed;
   if (!POOL_ADDRESS || !/^\d{1,10}$/.test(id)) return null;
-  try {
-    return await readLivePool(BigInt(id), true);
-  } catch {
-    return null;
-  }
+  return readLivePool(BigInt(id), true);
 }
 
-/** The newest live pools (no log history, to keep the board cheap) followed by the seed batches. */
-export async function listCampaigns(): Promise<Campaign[]> {
+/** Strict list: the newest live pools (no log history, to keep the board cheap) then the seed batches. Throws when poolCount cannot be read. */
+export async function fetchCampaignList(): Promise<Campaign[]> {
   if (!POOL_ADDRESS) return campaigns;
-  try {
-    const total = await withTimeoutAndRetry(() =>
-      publicClient.readContract({ address: POOL_ADDRESS!, abi: quorumPoolAbi, functionName: "poolCount" }),
-    );
-    const ids: bigint[] = [];
-    for (let i = total; i >= BigInt(1) && ids.length < LIVE_POOLS_ON_BOARD; i -= BigInt(1)) ids.push(i);
-    const live = await Promise.all(ids.map((i) => readLivePool(i, false).catch(() => null)));
-    return [...live.filter((c): c is Campaign => c !== null), ...campaigns];
-  } catch {
-    return campaigns;
-  }
+  const total = await withTimeoutAndRetry(() =>
+    publicClient.readContract({ address: POOL_ADDRESS!, abi: quorumPoolAbi, functionName: "poolCount" }),
+  );
+  const ids: bigint[] = [];
+  for (let i = total; i >= BigInt(1) && ids.length < LIVE_POOLS_ON_BOARD; i -= BigInt(1)) ids.push(i);
+  const live = await Promise.all(ids.map((i) => readLivePool(i, false).catch(() => null)));
+  return [...live.filter((c): c is Campaign => c !== null), ...campaigns];
+}
+
+/** Lenient form of fetchCampaign: null instead of an error. */
+export async function loadCampaign(id: string): Promise<Campaign | null> {
+  return fetchCampaign(id).catch(() => null);
+}
+
+/** Lenient form of fetchCampaignList: the seed batches instead of an error. */
+export async function listCampaigns(): Promise<Campaign[]> {
+  return fetchCampaignList().catch(() => campaigns);
 }

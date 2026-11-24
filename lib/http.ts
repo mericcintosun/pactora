@@ -58,6 +58,18 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 /**
+ * Cap a whole read (several calls, retries included) at `ms`. Past the cap it rejects
+ * with CallError("upstream_timeout"); the underlying calls are left to finish unseen.
+ */
+export async function withBudget<T>(p: Promise<T>, ms: number): Promise<T> {
+  try {
+    return await withTimeout(p, ms);
+  } catch (err) {
+    throw toCallError(err);
+  }
+}
+
+/**
  * Run `fn` with a timeout per attempt and one retry. `timeoutMs` may only raise the
  * per-attempt limit for receipt waits (RECEIPT_TIMEOUT_MS); the retry count is fixed.
  */

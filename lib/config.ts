@@ -39,6 +39,10 @@ export const CALL_TIMEOUT_MS = 12_000;
 export const CALL_RETRIES = 1;
 /** How long the relayer waits for a receipt per attempt. */
 export const RECEIPT_TIMEOUT_MS = 60_000;
+/** A page's whole live read must finish within this, or the page is served from seed data (lib/adapter/index.ts). */
+export const PAGE_READ_BUDGET_MS = 4_000;
+/** Log history (sign times, create and settle tx) is optional on a live page; it gets this long. */
+export const HISTORY_BUDGET_MS = 2_500;
 /** Relay requests per IP per minute (best effort, per server instance). */
 export const RATE_LIMIT_PER_MIN = 12;
 /** How far back history reads walk, in blocks (1,000 block chunks). */

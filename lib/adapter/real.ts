@@ -2,7 +2,7 @@
 // multicall reads and logs); writes go through the server relayer in lib/relayer.ts.
 // Only the selector in this folder (index.ts) imports this file; no client component imports either.
 import { parseUnits } from "viem";
-import { listCampaigns, loadCampaign } from "@/lib/aevum";
+import { fetchCampaign, fetchCampaignList } from "@/lib/aevum";
 import { TUSD8_DECIMALS } from "@/lib/config";
 import { isApiError, type ApiError } from "@/lib/errors";
 import { submitCancel, submitCreatePool, submitPledge, submitSettle, type RelayResult } from "@/lib/relayer";
@@ -24,12 +24,14 @@ function livePoolId(id: string): number {
 export const realAdapter: CampaignAdapter = {
   mode: "real",
 
+  // Reads are strict: an RPC failure throws, and lib/adapter/index.ts (FALLBACK) serves
+  // the fake adapter's seed data for that request instead.
   async list() {
-    return listCampaigns();
+    return fetchCampaignList();
   },
 
   async get(id) {
-    return loadCampaign(id);
+    return fetchCampaign(id);
   },
 
   async createBatch(draft: BatchDraftInput) {

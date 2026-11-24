@@ -1,11 +1,12 @@
 // Server component: one sentence that says where the page's data comes from.
-// Pages pass getAdapter().mode in, so no client file ever touches the selector.
+// Pages pass the read outcome's mode (and whether the FALLBACK in lib/adapter/index.ts
+// served seed data) in, so no client file ever touches the selector.
 import { AEVUM_CHAIN_ID, explorerAddress, POOL_ADDRESS } from "@/lib/aevum";
 import type { AdapterMode } from "@/lib/config";
 import { shortHex } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-export function ModeLine({ mode, className }: { mode: AdapterMode; className?: string }) {
+export function ModeLine({ mode, fallback = false, className }: { mode: AdapterMode; fallback?: boolean; className?: string }) {
   return (
     <p className={cn("border-2 border-foreground bg-card px-4 py-2 text-sm text-foreground", className)}>
       {mode === "real" && POOL_ADDRESS ? (
@@ -16,6 +17,8 @@ export function ModeLine({ mode, className }: { mode: AdapterMode; className?: s
           </a>
           , writes go through the gasless relayer.
         </>
+      ) : fallback ? (
+        "Sample data: Aevum testnet did not answer within 4 seconds, so this page shows seeded batches and practice wallets. Reload to try the chain again."
       ) : (
         "Sample data: this page shows seeded batches and practice wallets, not Aevum."
       )}

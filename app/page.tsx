@@ -5,7 +5,7 @@ import { ModeLine } from "@/components/mode-line";
 import { SceneSlot } from "@/components/scene-slot";
 import { Button } from "@/components/ui/button";
 import { Card, CardBar, CardContent } from "@/components/ui/card";
-import { getAdapter } from "@/lib/adapter";
+import { readCampaignList } from "@/lib/adapter";
 import { EXAMPLE_CAMPAIGN_ID } from "@/lib/data/seed";
 
 export const metadata: Metadata = {
@@ -16,8 +16,8 @@ export const metadata: Metadata = {
 export const revalidate = 30;
 
 export default async function Home() {
-  const adapter = getAdapter();
-  const campaigns = await adapter.list();
+  // Server read only; seed data through the FALLBACK in lib/adapter/index.ts when Aevum does not answer.
+  const { data: campaigns, mode, fallback } = await readCampaignList();
   const lapsed = campaigns.filter((c) => c.status === "lapsed");
   const lapsedBuyers = lapsed.reduce((n, c) => n + c.pledges.filter((p) => p.state === "expired").length, 0);
 
@@ -133,7 +133,7 @@ export default async function Home() {
       </section>
 
       <div className="mx-auto max-w-6xl px-4 pb-4 pt-16">
-        <ModeLine mode={adapter.mode} className="text-xs" />
+        <ModeLine mode={mode} fallback={fallback} className="text-xs" />
       </div>
     </>
   );

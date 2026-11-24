@@ -3,18 +3,18 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CampaignRoom } from "@/components/campaign-room";
 import { ModeLine } from "@/components/mode-line";
-import { getAdapter } from "@/lib/adapter";
+import { readCampaign, readCampaignList } from "@/lib/adapter";
 import { explorerAddress } from "@/lib/aevum";
 import { formatTusd, formatUtc, shortHex } from "@/lib/format";
 
 export async function generateStaticParams() {
-  const campaigns = await getAdapter().list();
-  return campaigns.map((c) => ({ id: c.id }));
+  const { data } = await readCampaignList();
+  return data.map((c) => ({ id: c.id }));
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
-  const c = await getAdapter().get(id);
+  const { data: c } = await readCampaign(id);
   if (!c) return { title: "Batch not found" };
   return {
     title: `${c.product} by ${c.maker}`,
@@ -27,9 +27,14 @@ export const revalidate = 5;
 
 export default async function CampaignPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const adapter = getAdapter();
-  const campaign = await adapter.get(id);
-  if (!campaign) notFound();
+  // Server read only (no client fetch): seed slugs first, live pools through the real adapter,
+  // seed data through the FALLBACK in lib/adapter/index.ts when Aevum does not answer.
+  const { data: campaign, mode, fallback } = await readCampaign(id);
+  if (!campaign) {
+    // A live pool id whose read fell back has no seed twin: show the retry boundary, not a 404.
+    if (fallback) throw new Error("live pool read fell back with no seed twin");
+    notFound();
+  }
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-12">
@@ -51,9 +56,9 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
           amount, and expires {formatUtc(campaign.deadline)}.
         </p>
       </header>
-      <ModeLine mode={adapter.mode} className="mt-8" />
+      <ModeLine mode={mode} fallback={fallback} className="mt-8" />
       <div className="mt-6">
-        <CampaignRoom campaign={campaign} mode={adapter.mode} />
+        <CampaignRoom campaign={campaign} mode={mode} />
       </div>
     </div>
   );
