@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" width="800" height="400">
+  <rect width="800" height="400" fill="#f2efe8"/>
+  <g fill="#f2efe8" stroke="#111111" stroke-width="6">
+    <rect x="50" y="40" width="210" height="290"/><rect x="295" y="40" width="210" height="290"/><rect x="540" y="40" width="210" height="290"/>
+  </g>
+  <g fill="#111111">
+    <rect x="50" y="40" width="210" height="50"/><rect x="295" y="40" width="210" height="50"/><rect x="540" y="40" width="210" height="50"/>
+  </g>
+  <g font-family="Arial, sans-serif" font-weight="700" fill="#f2efe8" font-size="20">
+    <text x="72" y="73">WALLET A</text><text x="317" y="73">WALLET B</text><text x="562" y="73">WALLET C</text>
+  </g>
+  <g font-family="Arial, sans-serif" font-size="16" fill="#111111">
+    <text x="72" y="124">BEFORE</text><text x="317" y="124">BEFORE</text><text x="562" y="124">BEFORE</text>
+    <text x="72" y="222">AFTER</text><text x="317" y="222">AFTER</text><text x="562" y="222">AFTER</text>
+  </g>
+  <g font-family="Georgia, serif" font-weight="700" font-size="38" fill="#111111">
+    <text x="72" y="168">84.50</text><text x="317" y="168">131.50</text><text x="562" y="168">47.50</text>
+    <text x="72" y="266">84.50</text><text x="317" y="266">131.50</text><text x="562" y="266">47.50</text>
+  </g>
+  <g stroke="#111111" stroke-width="4">
+    <line x1="72" y1="190" x2="238" y2="190"/><line x1="317" y1="190" x2="483" y2="190"/><line x1="562" y1="190" x2="728" y2="190"/>
+  </g>
+  <g stroke="#2e7d4f" stroke-width="8" fill="none" stroke-linecap="square">
+    <polyline points="200,296 216,314 246,278"/><polyline points="445,296 461,314 491,278"/><polyline points="690,296 706,314 736,278"/>
+  </g>
+  <rect x="50" y="356" width="700" height="6" fill="#111111"/>
+</svg>

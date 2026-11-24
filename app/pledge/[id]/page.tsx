@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CampaignRoom } from "@/components/campaign-room";
 import { ModeLine } from "@/components/mode-line";
+import { SceneSlot } from "@/components/scene-slot";
 import { readCampaign, readCampaignList } from "@/lib/adapter";
 import { explorerAddress } from "@/lib/aevum";
 import { formatTusd, formatUtc, shortHex } from "@/lib/format";
@@ -41,7 +42,7 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
       <Link href="/pledge" className="text-sm font-semibold underline decoration-2 underline-offset-4">
         All campaigns
       </Link>
-      <header className="pactora-enter mt-6 border-b-2 border-foreground pb-6">
+      <header className="pactora-enter mt-6 border-b-2 border-foreground pb-8">
         <p className="text-sm font-semibold uppercase tracking-widest">
           {campaign.maker}, {campaign.city}
         </p>
@@ -60,6 +61,47 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
       <div className="mt-6">
         <CampaignRoom campaign={campaign} mode={mode} />
       </div>
+
+      {campaign.status === "lapsed" ? (
+        <section aria-labelledby="lapsed-closing" className="mt-16 grid gap-8 border-t-2 border-foreground pt-10 md:grid-cols-12">
+          <div className="md:col-span-5">
+            <h2 id="lapsed-closing" className="text-3xl font-bold leading-tight">
+              Nobody&apos;s money moved
+            </h2>
+            <p className="mt-4 max-w-[60ch] leading-relaxed">
+              This batch closed at {campaign.pledges.filter((p) => p.state !== "withdrawn").length} of {campaign.minOrders}. The
+              signatures expired at the deadline, so there was no transfer and nothing to refund.
+            </p>
+          </div>
+          <div className="border-2 border-foreground md:col-span-7">
+            <SceneSlot n={5}
+              alt="Three buyers' wallet cards, each showing the same tUSD8 balance before and after the lapsed batch, with a check under every card"
+              width={800}
+              height={400}
+            />
+          </div>
+        </section>
+      ) : (
+        <section aria-labelledby="collect-shape" className="mt-16 grid gap-8 border-t-2 border-foreground pt-10 md:grid-cols-12">
+          <div className="md:col-span-5">
+            <h2 id="collect-shape" className="text-3xl font-bold leading-tight">
+              What collect looks like
+            </h2>
+            <p className="mt-4 max-w-[60ch] leading-relaxed">
+              One settle transaction redeems every signature: {campaign.minOrders} transfers of{" "}
+              {formatTusd(campaign.pricePerOrder)} into the pool, then {formatTusd(campaign.minOrders * campaign.pricePerOrder)}{" "}
+              to {campaign.maker}. If one transfer fails, the whole transaction reverts.
+            </p>
+          </div>
+          <div className="border-2 border-foreground md:col-span-7">
+            <SceneSlot n={4}
+              alt="A printed receipt for one settle transaction listing five signed payments of 2 tUSD8 and a ruled total of 10 tUSD8 to the roaster"
+              width={640}
+              height={560}
+            />
+          </div>
+        </section>
+      )}
     </div>
   );
 }
