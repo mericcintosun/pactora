@@ -1,6 +1,6 @@
 # Pactora
 
-Pactora is pre-orders for small makers. Buyers only sign. When enough orders arrive, every payment is collected in one transaction; if they don't, nobody's money ever moves. Built with Next.js 15, Tailwind CSS v4, viem 2 and a Foundry-tested Solidity contract on Aevum testnet with tUSD8.
+Pactora is pre-orders for small makers. Buyers only sign. When enough orders arrive, every payment is collected in one transaction; if they don't, nobody's money ever moves. Built with Next.js 15, React 19, Tailwind CSS 4, viem 2, zod 3 and a Foundry-tested Solidity contract on Aevum testnet with tUSD8.
 
 > Live demo: https://pactora-smoky.vercel.app
 
@@ -42,10 +42,13 @@ flowchart LR
 | Piece | File | Role |
 | --- | --- | --- |
 | Contract | `contracts/src/QuorumPool.sol` | createPool, pledge (signature check), withdrawPledge, dropPledge, settle |
-| Data adapter | `lib/adapter/` | `getAdapter()`: fake (seed data, default) or real (`ADAPTER_MODE=real`); pages and `/api/campaigns` read through it |
+| Data adapter | `lib/adapter/` | `getAdapter()`: fake (seed data, default) or real (`ADAPTER_MODE=real` and a pool address); pages and `/api/campaigns` read through it |
 | Seed data | `lib/data/seed.ts` | Eleven fixed maker batches, deterministic placeholder hashes |
-| Chain module | `lib/aevum.ts` | Aevum chain config, ABIs, EIP-712 typed data, `loadCampaign` (multicall read, falls back to seed), `getLogsChunked` |
-| Relayer | `app/api/relay/route.ts` | Gasless pledge, cancel and settle. Legacy transactions, rate limited, mock hash when unconfigured |
+| Config | `lib/config.ts` | Every env key, timeouts, the single retry, the rate limit and the `[core]` log prefix |
+| Chain module | `lib/aevum.ts` | Aevum chain, ABIs, EIP-712 typed data, `loadCampaign` (multicall plus `Pledged` / `Settled` logs via `getLogsChunked`) |
+| Relay endpoint | `app/api/relay/route.ts` | zod validation first, then rate limit, then the practice branch, then the live relayer |
+| Relayer | `lib/relayer.ts` | Server only. Gasless pledge, cancel, settle and createPool as legacy txs; decodes the settle receipt's tUSD8 transfers |
+| Edge contracts | `lib/schemas.ts`, `lib/errors.ts` | Request schemas and the `{ error, hint }` codes the UI switches on |
 | Workspace | `app/pledge/page.tsx` | Sellers open a batch; the board of all batches |
 | Result page | `app/pledge/[id]/page.tsx` | Live counter, signer list, sign / withdraw / collect, on-chain trail, copy link |
 
@@ -75,7 +78,7 @@ flowchart LR
 
 ## Tech stack
 
-Next.js 15 (App Router), TypeScript, Tailwind CSS v4, shadcn-style primitives, viem 2, AutoAnimate and Motion for list and counter transitions, Solidity 0.8.24 with Foundry, Aevum testnet, tUSD8, Vercel.
+Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS 4, shadcn-style primitives, viem 2, zod 3 for request validation, AutoAnimate and Motion for list and counter transitions, Solidity ^0.8.20 (compiled for the shanghai EVM) with Foundry, Aevum testnet, tUSD8, Vercel.
 
 The 90-second demo path is in [DEMO.md](DEMO.md).
 
@@ -83,12 +86,16 @@ The 90-second demo path is in [DEMO.md](DEMO.md).
 
 ```bash
 npm install
-npm run dev          # http://localhost:3000, practice mode on seed data
-npm run seed         # prints the seed count and its sha256 (Node 22.6+)
-cd contracts && forge build && forge test
+npm run dev              # http://localhost:3000, practice mode on seed data
+npm run seed             # prints the seed count and its sha256 (Node 22.6+)
+npm test                 # zod schema tests (node:test, Node 22.6+)
+npm run test:contracts   # cd contracts && forge test
+npm run proof            # reads tUSD8 and the chain, runs forge test, rewrites the Proof blocks below
 ```
 
 Practice mode needs no keys: the counter, sign, withdraw and collect flows run against eleven seeded batches and the relayer returns placeholder hashes.
+
+Every page says where its data comes from in one line. With sample data: "Sample data: this page shows seeded batches and practice wallets, not Aevum." With the real adapter on: "Live on Aevum testnet (44005): reads come from QuorumPool at ..., writes go through the gasless relayer." The line follows `getAdapter().mode`, which is `real` only when `ADAPTER_MODE=real` and `NEXT_PUBLIC_CONTRACT_ADDRESS` are both set. Seeded batches stay in practice mode even then; live pools appear on the board under their pool number.
 
 Going live on Aevum:
 
@@ -101,7 +108,7 @@ PRIVATE_KEY=0x... forge script script/Deploy.s.sol --rpc-url https://rpc-test.qd
 
 | Variable | Where it comes from |
 | --- | --- |
-| `ADAPTER_MODE` | `fake` (seed data, default) or `real` |
+| `ADAPTER_MODE` | `fake` (seed data, default) or `real`; `real` needs `NEXT_PUBLIC_CONTRACT_ADDRESS` too |
 | `NEXT_PUBLIC_CONTRACT_ADDRESS` | Output of `Deploy.s.sol` |
 | `NEXT_PUBLIC_CHAIN_ID` | `44005` |
 | `NEXT_PUBLIC_AEVUM_RPC` | `https://rpc-test.qday.info` |
@@ -115,14 +122,58 @@ PRIVATE_KEY=0x... forge script script/Deploy.s.sol --rpc-url https://rpc-test.qd
 - The starter kit documents tUSD8 as EIP-3009 but doesn't spell out `receiveWithAuthorization` and `cancelAuthorization`. If either is missing, the fallback is `transferWithAuthorization` with `to = pool`, documented here once tested.
 - A buyer who empties their wallet after signing reverts the whole settle. The seller calls `dropPledge` on that buyer and settles the rest.
 - The Aevum explorer verifier has been unreliable. The deployed address and commit hash go here either way.
+- Pools opened through the relayer (`submitCreatePool`, the real adapter's `createBatch`) name the relayer wallet as the seller, so their payout goes to the relayer. Sellers signing `createPool` from their own wallet is Phase 3 work.
+- Live campaign pages read pool events from the last 10,000 blocks (`LOG_LOOKBACK_BLOCKS`). Older pools still load from the multicall, but without per-buyer sign times and the create tx link.
+- The relay's rate limit (12 requests per minute per IP) is kept in memory per server instance, so it is best effort on Vercel.
 
 ## What we would build next
 
-- Foundry tests for below-threshold, post-deadline, cancelled, front-run and empty-wallet cases.
 - Per-signature balance warnings on the campaign page, read through Multicall3.
-- Receipts built from `Pledged` and `Settled` logs via `getLogsChunked`.
 - A seller embed: one script tag that drops a live counter onto an existing shop page.
 - Post-quantum signing on QDay mainnet once its ML-DSA precompile ships.
+
+## Proof
+
+`npm run proof` (`scripts/proof.mjs`) rewrites only the text between each `<!-- PROOF:BEGIN name -->` and `<!-- PROOF:END name -->` pair below. It reads public values only, never a key. A proof it could not run says so in one line; it never fills in output it did not get.
+
+### tUSD8 capabilities
+
+<!-- PROOF:BEGIN tusd8-capabilities -->
+_Generated by `npm run proof` at 2026-11-24T10:53:58Z._
+
+- Token `0x456569838f1d43009A91ebA4263147Afd7233483` on chain 44005
+- `name()`: "tUSD8"
+- `version()`: "2"
+- `decimals()`: 6
+- `DOMAIN_SEPARATOR()` matches the EIP-712 domain built from that name, version and chain 44005.
+- Proxy: implementation at `0xd6be708f41b07b2f4a7b48889b8e16626e317597`; selectors checked in both bytecodes.
+- `receiveWithAuthorization` (0xef55bec6): present in bytecode
+- `cancelAuthorization` (0x5a049a70): present in bytecode
+- `transferWithAuthorization` (0xe3ee160e): present in bytecode
+- `authorizationState` (0xe94a0102): present in bytecode
+<!-- PROOF:END tusd8-capabilities -->
+
+### Chain latency
+
+<!-- PROOF:BEGIN chain-latency -->
+_Generated by `npm run proof` at 2026-11-24T10:53:58Z._
+
+- RPC `https://rpc-test.qday.info`
+- Chain id: 44005
+- Latest block: 3997477
+- Round trip for `eth_chainId`: 214 ms
+- QuorumPool: NEXT_PUBLIC_CONTRACT_ADDRESS is not set, so the pool was not read.
+<!-- PROOF:END chain-latency -->
+
+### Contract tests
+
+<!-- PROOF:BEGIN contract-tests -->
+_Generated by `npm run proof` at 2026-11-24T10:53:58Z._
+
+Not run in this build: forge test exited 1 without a summary line.
+<!-- PROOF:END contract-tests -->
+
+The suite (`contracts/test/QuorumPool.t.sol`, run with `npm run test:contracts`) covers the five-buyer settle with its `Settled` event, below-threshold, after-deadline, cancelled authorization, front-run, emptied wallet plus `dropPledge`, seller-only `dropPledge`, bad signature, duplicate pledge, and a fuzz test that settle always pays exactly orders x price.
 
 ## AI use
 
