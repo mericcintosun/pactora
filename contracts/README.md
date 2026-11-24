@@ -29,13 +29,16 @@ README, and saves the explorer link.
 
 ## Environment
 
-- `PRIVATE_KEY`: deployer key (testnet wallet funded from faucet.qday.info).
-  Both scripts read it with `vm.envUint("PRIVATE_KEY")` and pass it to
-  `vm.startBroadcast(pk)`, so the key travels in the process environment, never
-  as a `--private-key` argument visible in `ps`. The farm runner sets it from
-  `FARM_EVM_PRIVATE_KEY`.
-- `TUSD8_ADDRESS` (optional): overrides the tUSD8 address baked into `Deploy.s.sol`.
-- `DEPLOYED_CONTRACT`: the QuorumPool address, read by `Smoke.s.sol`.
+Every `vm.env*` name the scripts read, and where its value comes from:
+
+| Name | Read by | Cheatcode | Where the value comes from |
+| --- | --- | --- | --- |
+| `PRIVATE_KEY` | `Deploy.s.sol`, `Smoke.s.sol` | `vm.envUint("PRIVATE_KEY")` | The deployer's testnet key. The farm runner sets it from `FARM_EVM_PRIVATE_KEY`; fund it with about 1 tQDAY from faucet.qday.info first. |
+| `TUSD8_ADDRESS` (optional) | `Deploy.s.sol` | `vm.envOr("TUSD8_ADDRESS", ...)` | Overrides the tUSD8 address baked into the script (`0x456569838f1d43009A91ebA4263147Afd7233483`, from the aevum-starter-kit README). |
+| `DEPLOYED_CONTRACT` | `Smoke.s.sol` | `vm.envAddress("DEPLOYED_CONTRACT")` | The QuorumPool address printed by `Deploy.s.sol` (the `Deployed` event). The app reads the same value as `NEXT_PUBLIC_CONTRACT_ADDRESS`. |
+
+The key is passed to `vm.startBroadcast(pk)`, so it travels in the process
+environment, never as a `--private-key` argument visible in `ps`.
 
 ## Functions
 
@@ -50,9 +53,38 @@ README, and saves the explorer link.
 Nonce per buyer: `keccak256(abi.encode(pool, poolId, buyer, round))`. The round
 bumps after a withdrawal so a buyer can rejoin with a fresh signature.
 
-## Tests to write next (`test/QuorumPool.t.sol`)
+## Tests (`test/QuorumPool.t.sol`)
 
-Below threshold reverts, settle after deadline reverts, cancelled authorization
-cannot be redeemed, a front-runner calling `receiveWithAuthorization` directly
-fails because only the pool is the `to`, and a buyer with an empty wallet reverts
-the whole settle until the seller drops them.
+```bash
+cd contracts && forge test        # or from the repo root: npm run test:contracts
+```
+
+No forge-std: the cheatcodes the suite needs (`sign`, `addr`, `prank`, `warp`,
+`expectRevert`, `expectEmit`) are declared in a local `Vm` interface.
+`test/MockTUSD8.sol` stands in for tUSD8 with real EIP-3009 behaviour: EIP-712
+domain `{ name: "tUSD8", version: "2" }`, `receiveWithAuthorization` that only the
+`to` address may call, `validAfter` / `validBefore` checks, signer recovery,
+single-use nonces, `cancelAuthorization`, `authorizationState` and `mint`.
+
+| Test | What it proves |
+| --- | --- |
+| `test_settleHappyPath` | five signed buyers, one settle, seller gets 5 x price, `Settled` emitted, pool keeps 0 |
+| `test_settleRevertsBelowThreshold` | below the minimum, `BelowThreshold` and nothing moves |
+| `test_settleAfterDeadlineReverts` | after the deadline, `PoolClosed` |
+| `test_cancelledAuthorizationBlocksSettleThenWithdrawWorks` | a cancelled authorization reverts settle; the relayer can then `withdrawPledge` |
+| `test_withdrawByStrangerWithoutCancelReverts` | nobody can withdraw a live pledge for someone else |
+| `test_frontRunnerCannotRedeem` | calling `receiveWithAuthorization` directly fails: only the pool can redeem |
+| `test_emptyWalletRevertsUntilSellerDrops` | an emptied wallet reverts the whole settle; after `dropPledge` the rest settle |
+| `test_dropPledgeByStrangerReverts` | `dropPledge` is seller only (`NotAllowed`) |
+| `test_badSignatureReverts` | a signature from another key is `BadSignature` |
+| `test_duplicatePledgeReverts` | one live pledge per buyer (`AlreadyPledged`) |
+| `testFuzz_settleTotalEqualsPriceTimesOrders` | for 1 to 24 orders and any non-zero price, seller gets orders x price and the pool ends at 0 |
+
+## Checks, effects, interactions
+
+`pledge`, `withdrawPledge`, `dropPledge` and `settle` each read in that order in
+the function body. The only external calls before an effect are view reads on
+the token (`authorizationState`, `DOMAIN_SEPARATOR`). `settle` marks the pool
+settled before the first `receiveWithAuthorization`, and its loop is bounded by
+`MAX_ENTRIES` (256), which `pledge` enforces. Every state change the UI shows has
+an event: `PoolCreated`, `Pledged`, `PledgeWithdrawn`, `PledgeDropped`, `Settled`.

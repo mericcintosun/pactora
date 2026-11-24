@@ -109,8 +109,11 @@ contract QuorumPool {
     /// @notice Seller escape hatch: remove a pledge whose buyer emptied their wallet,
     /// so one bad authorization cannot block settle for everyone else.
     function dropPledge(uint256 poolId, address buyer) external {
+        // checks
         Pool storage p = _openPool(poolId);
         if (msg.sender != p.seller) revert NotAllowed();
+        if (!_auths[poolId][buyer].active) revert NotPledged();
+        // effects (no interactions)
         _deactivate(poolId, buyer);
         emit PledgeDropped(poolId, buyer, activeCount[poolId]);
     }
@@ -126,10 +129,14 @@ contract QuorumPool {
     /// @notice Register a signed authorization. Usually submitted by the relayer so
     /// the buyer pays no gas. The signature is checked here against tUSD8's domain.
     function pledge(uint256 poolId, address buyer, uint256 validAfter, uint8 v, bytes32 r, bytes32 s) external {
+        // checks: pool open, buyer not active, room left, nonce unused, signature recovers to buyer.
+        // The two token reads below are view calls; no state is written before they return.
         Pool storage p = _openPool(poolId);
         Auth storage a = _auths[poolId][buyer];
         if (a.active) revert AlreadyPledged();
         if (activeCount[poolId] >= p.maxOrders) revert PoolFull();
+        if (!a.seen && _entrants[poolId].length >= MAX_ENTRIES) revert PoolFull();
+        if (uint256(s) > HALF_N || (v != 27 && v != 28)) revert BadSignature();
 
         bytes32 nonce = nonceFor(poolId, buyer);
         if (token.authorizationState(buyer, nonce)) revert NonceUsed();
@@ -138,12 +145,11 @@ contract QuorumPool {
             abi.encode(RECEIVE_WITH_AUTHORIZATION_TYPEHASH, buyer, address(this), p.price, validAfter, uint256(p.deadline), nonce)
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", token.DOMAIN_SEPARATOR(), structHash));
-        if (uint256(s) > HALF_N || (v != 27 && v != 28)) revert BadSignature();
         address signer = ecrecover(digest, v, r, s);
         if (signer == address(0) || signer != buyer) revert BadSignature();
 
+        // effects
         if (!a.seen) {
-            if (_entrants[poolId].length >= MAX_ENTRIES) revert PoolFull();
             _entrants[poolId].push(buyer);
             a.seen = true;
         }
@@ -160,8 +166,11 @@ contract QuorumPool {
     /// once the buyer has cancelled the authorization on the token itself via
     /// cancelAuthorization. Either way the buyer needs no gas.
     function withdrawPledge(uint256 poolId, address buyer) external {
+        // checks (the token read is a view call)
         _openPool(poolId);
+        if (!_auths[poolId][buyer].active) revert NotPledged();
         if (msg.sender != buyer && !token.authorizationState(buyer, nonceFor(poolId, buyer))) revert NotAllowed();
+        // effects (no interactions)
         _deactivate(poolId, buyer);
         emit PledgeWithdrawn(poolId, buyer, activeCount[poolId]);
     }
@@ -170,21 +179,25 @@ contract QuorumPool {
 
     /// @notice Redeem every active authorization and pay the seller, atomically.
     function settle(uint256 poolId) external {
+        // checks
         Pool storage p = _openPool(poolId);
         uint256 orders = activeCount[poolId];
         if (orders < p.minOrders) revert BelowThreshold();
-        p.settled = true; // effects before interactions
 
+        // effects: close the pool before any token call, so a re-entrant settle hits PoolClosed.
+        p.settled = true;
+        uint256 total = orders * p.price;
+
+        // interactions: entrants.length is capped at MAX_ENTRIES (256) in pledge(), so the loop is bounded.
         address[] storage entrants = _entrants[poolId];
-        uint256 total;
-        for (uint256 i = 0; i < entrants.length; i++) {
+        uint256 n = entrants.length;
+        for (uint256 i = 0; i < n; i++) {
             address buyer = entrants[i];
             Auth storage a = _auths[poolId][buyer];
             if (!a.active) continue;
             token.receiveWithAuthorization(
                 buyer, address(this), p.price, a.validAfter, p.deadline, nonceFor(poolId, buyer), a.v, a.r, a.s
             );
-            total += p.price;
         }
         if (!token.transfer(p.seller, total)) revert TransferFailed();
         emit Settled(poolId, p.seller, orders, total);
@@ -208,9 +221,9 @@ contract QuorumPool {
         if (p.settled || block.timestamp >= p.deadline) revert PoolClosed();
     }
 
+    /// Effects only. Callers check `active` first.
     function _deactivate(uint256 poolId, address buyer) private {
         Auth storage a = _auths[poolId][buyer];
-        if (!a.active) revert NotPledged();
         a.active = false;
         a.round += 1;
         activeCount[poolId] -= 1;
