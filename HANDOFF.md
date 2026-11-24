@@ -1,0 +1,120 @@
+# HANDOFF: Pactora
+
+You are picking up a working Next.js 15 scaffold. Read this file top to bottom, then read `IDENTITY.md`, then start on Mission item 1. Keep `npm run build` green after every change.
+
+## 1. Context
+
+**Product:** Pactora
+**One-liner:** Pre-orders for small makers. Buyers only sign. When enough orders arrive, every payment is collected in one transaction; if the batch falls short, nobody's money ever moves.
+
+**Plain pitch:** A small coffee roaster needs at least 10 orders before a new lot is worth roasting, so she opens a Pactora page. You land on it and press "I'm in". Your wallet asks for one signature and nothing leaves your account. The moment the counter reaches 10, every buyer's payment moves to the roaster at once and everyone gets a receipt. If the deadline passes with fewer than 10, nothing happens at all: your money never left, so there is no refund to wait for. Change your mind before the deadline and you can withdraw your signature with one click.
+
+**Mechanism:** each buyer signs a tUSD8 EIP-3009 `receiveWithAuthorization` whose `to` is the QuorumPool contract, with a fixed value, `validBefore` equal to the campaign deadline and a nonce bound to `(pool, poolId, buyer, round)`. Only the `to` address can redeem a `receiveWithAuthorization`, so nobody but the pool can spend it. When the count reaches the minimum, anyone calls `settle(poolId)`; the pool redeems every authorization in one transaction and forwards the total to the seller. One failing authorization reverts the whole settle. Short of the threshold, the signatures simply expire.
+
+**Hackathon:** Aevum Builder Challenge #1 (QDay), https://dorahacks.io/hackathon/qday
+**Submission deadline:** 2026-12-11 08:00 UTC (16:00 UTC+8). Demo Day for the top 5: 2026-12-15 06:00 UTC, 3 to 5 minute live presentation.
+**Target track:** 1st Place ($800 USDT). One submission is ranked for 1st/2nd/3rd automatically; there are no sponsor bounties. Theme category to pick on DoraHacks: Crowdfunding.
+
+**Verified submission requirements:**
+1. Public GitHub repo with clean, readable code.
+2. Demo video link (required in the DoraHacks form; the builder records it).
+3. Proof of QDay infrastructure: a smart contract using tUSD8 on Aevum testnet (this is QuorumPool).
+4. Live deployment: working demo (Vercel, https://pactora.vercel.app).
+5. One end-to-end flow: contract, simple UI, verified source code.
+6. Documentation: problem, architecture, key workflows, technology list (README.md).
+7. Top 5 present live at Demo Day.
+Rules: all code written inside the event window, test tokens on Aevum testnet only.
+
+**Judging (weights from qday.io/builder-challenge):** Innovation 20, UX 15, Technical quality 15, Real-world utility 15, Safety and controls 15, Demo 10, Docs 10. Judges explicitly ask for visible tx hashes, explorer links, spend caps, expiry, instant revocation and an architecture flowchart in the README.
+
+## 2. Current state
+
+Identity: see IDENTITY.md (direction D7, structure S2, archetype L7, kit K7)
+
+Pressroom look: newsprint ground, 2px black rules, black headline bars, one signal red per screen, sharp corners, Libre Caslon Text for h1/h2 and Libre Franklin for body. M3 scale entrance (`pactora-scale-in`) in `app/globals.css` with a reduced-motion block.
+
+### Routes (S2 landing-workspace, verb = "pledge")
+
+| Route | File | What it shows |
+| --- | --- | --- |
+| `/` | `app/page.tsx` | L7 diagonal landing: clip-path black block, headline left, live `CampaignBoard` right; one CTA opens Ayşe's roast batch |
+| `/pledge` | `app/pledge/page.tsx` | Workspace: seller batch form (`BatchWorkspace`) plus the full board; `?example=kavruk-guji` preloads the example |
+| `/pledge/[id]` | `app/pledge/[id]/page.tsx` | One campaign as a shareable page: counter, signer list, sign / withdraw / collect, tx log, copy-link control (`CampaignRoom`) |
+| `/how` | `app/how/page.tsx` | Method, contract rules, Aevum / tUSD8 addresses, safety controls |
+| `POST /api/relay` | `app/api/relay/route.ts` | Gasless relayer for pledge, withdraw and settle |
+
+Header links: Campaigns (`/pledge`), Live batch (`/pledge/kavruk-guji`), How it works (`/how`), plus the CTA "Open a batch".
+
+### File map
+
+- `lib/data.ts`: types (`Campaign`, `Pledge`) and 10 seed campaigns (Istanbul roaster, Izmir tailor, Kadıköy riso printer, Porto letterpress, Berlin bakery, Ayvalık olive press, Ankara bindery, Austin hot sauce, Lisbon ceramics, Kars felt co-op): 5 open, 3 collected, 2 lapsed. Placeholder hashes are deterministic, not real txs.
+- `lib/aevum.ts`: the Aevum integration module. viem chain definition for 44005, QuorumPool ABI, tUSD8 EIP-712 typed data for `ReceiveWithAuthorization` and `CancelAuthorization`, `pledgeNonce`, `getLogsChunked` (1,000 block windows), `loadCampaign` (seed slug or live multicall read), `listCampaigns`.
+- `app/api/relay/route.ts`: real viem wallet client path when `RELAYER_PRIVATE_KEY` and `NEXT_PUBLIC_CONTRACT_ADDRESS` are set (legacy txs); otherwise returns a mock hash with `mode: "mock"`.
+- `components/campaign-board.tsx`: kit signature 1 (see below).
+- `components/campaign-room.tsx`: the live campaign room; motion counter, auto-animated signer list, sign/withdraw/collect, receipt log, lapsed-batch balance comparison.
+- `components/batch-workspace.tsx`: seller form (title, price, minimum, maximum, hours) creating a batch.
+- `components/site-header.tsx`, `components/brand-mark.tsx`, `components/scene-slot.tsx`, `components/ui/*`: chrome and primitives (sharp, 2px black borders).
+- `contracts/src/QuorumPool.sol`: `createPool`, `pledge`, `withdrawPledge`, `dropPledge`, `settle`, `nonceFor`, `entrantsOf`, `isPledged`. `contracts/script/Deploy.s.sol`, `contracts/script/Smoke.s.sol`, `contracts/README.md`. `contracts/src/App.sol` is leftover template code that nothing deploys; delete it once you touch contracts.
+- Brand: `public/logo.svg`, `app/icon.svg`, `app/opengraph-image.tsx`, `public/illustrations/scene-1..3.svg` (scene 1 and 2 on `/`, scene 3 on `/how`).
+
+### Real vs mocked
+
+Real today: the contract, the EIP-712 typed data builders, the relayer's live viem path, the multicall read in `loadCampaign`, `getLogsChunked`.
+Mocked (each marked `TODO: swap mock`):
+- `CampaignRoom.join` / withdraw / collect in `components/campaign-room.tsx`: without a deployed pool they sign as the `DEMO_SIGNERS` practice wallets and get mock hashes from the relay.
+- `BatchWorkspace` submit in `components/batch-workspace.tsx`: returns a mock create tx instead of calling `createPool`.
+- `POST /api/relay` mock branch in `app/api/relay/route.ts`.
+- `loadCampaign` in `lib/aevum.ts`: per-buyer state and timestamps are not yet read from `Pledged` / `PledgeWithdrawn` logs.
+
+### Interaction kit (K7 flip)
+
+- Shipped: **signature 1, auto-animated collection.** `components/campaign-board.tsx` (`"use client"`, `useAutoAnimate`) on `/`. Rows are ordered by how many signatures each batch still needs; the filter (Gathering / Collected / Lapsed) and the "+ Sign" practice control change real seed counts and rows visibly move. The signer list in `CampaignRoom` is also auto-animated.
+- To build: **signature 2, view morph.** Clicking a board row morphs into the campaign room header via `motion` `layoutId` (wrap board and room summary in `LayoutGroup`, shared id `campaign-${id}`).
+- To build: **signature 3, inline sort/compare.** On `/pledge`, a sort control (signatures needed, deadline, price) that reorders the board rows, and on lapsed batches a before/after balance compare that reorders by balance.
+
+### One-mark proof (header home link, `components/site-header.tsx`)
+
+```tsx
+<Link href="/" className="flex items-center gap-2.5">
+  <BrandMark size={30} />
+  <span className="font-display text-2xl font-bold">Pactora</span>
+</Link>
+```
+
+## 3. Mission (priority order)
+
+1. **Verify tUSD8 first (0.5 h).** Fund deployer, relayer and 5 demo wallets from faucet.qday.info (once per address per 24 h, do it on day one). Run `cast call 0x456569838f1d43009A91ebA4263147Afd7233483 "name()"`, `"version()"`, `"decimals()"` and check `receiveWithAuthorization` / `cancelAuthorization` exist (fork test). If `receiveWithAuthorization` is missing, switch the pool to `transferWithAuthorization` with `to = pool` and document the front-run limit in README Known constraints. Fix the EIP-712 domain in `lib/aevum.ts` if name/version differ.
+2. **QuorumPool tests and deploy (3.5 h).** Add `contracts/test/QuorumPool.t.sol` with a mock EIP-3009 token: below-threshold settle reverts, settle after deadline reverts, cancelled authorization cannot be redeemed, direct `receiveWithAuthorization` by a front-runner fails, an empty-wallet buyer reverts settle until `dropPledge`. Then deploy with the commands in `contracts/README.md`:
+   ```bash
+   cd contracts && forge build
+   PRIVATE_KEY=$FARM_EVM_PRIVATE_KEY forge script script/Deploy.s.sol --rpc-url https://rpc-test.qday.info --broadcast --legacy
+   DEPLOYED_CONTRACT=0xYourPool PRIVATE_KEY=$FARM_EVM_PRIVATE_KEY forge script script/Smoke.s.sol --rpc-url https://rpc-test.qday.info --broadcast --legacy
+   ```
+   Done = address in `.env.local` and README Testnet addresses, `/how` shows it with an explorer link.
+3. **Gasless sign and withdraw (3 h).** Replace the mock branches in `CampaignRoom` and the relay with the live path (already drafted). Withdraw = buyer signs `CancelAuthorization`, relayer calls `withdrawPledge`. Add rate limiting per IP and pool validation in the relay. Done = a fresh wallet with 0 tQDAY signs, the counter ticks, its tUSD8 balance is unchanged, the tx link opens on the explorer.
+4. **Live campaign room (2.5 h).** Poll `activeCount` / `entrantsOf` via multicall every 4 s, fill per-buyer state from logs with `getLogsChunked`, show a per-signer balance warning when a buyer's tUSD8 balance drops below the price. Collect button enables at threshold. Plain-language errors for every revert reason.
+5. **Seller form live (1 h).** `BatchWorkspace` calls `createPool` from the seller's wallet (legacy tx), shows the create tx link, routes to `/pledge/<poolId>`.
+6. **Receipts and the lapsed screen (1.5 h).** Settled page lists every `Transfer` from the settle tx; lapsed page shows before/after balances per buyer ("nobody's balance changed").
+7. **Kit signatures 2 and 3 (1 h)** as described above.
+8. **Wow moment rehearsal (1 h).** Five browser profiles sign Ayşe's 5-order batch in turn; buyer 4 withdraws and rejoins; at 5/5 press Collect; open the explorer on the single settle tx showing five tUSD8 transfers in and 10 tUSD8 to the seller. Right next to it, the lapsed batch at 3/5 with identical balances. Record every tx hash in the README.
+9. **Docs and verify (1.5 h).** README flowchart, addresses, commit link, `forge verify-contract` retries.
+
+90-second demo script: 0-15 s seller creates "min 5, 2 tUSD8, 24 h" and the create tx link appears; 15-45 s five wallets sign, counter 1/5 to 5/5, one withdraw and rejoin; 45-65 s Collect, single tx with five transfers on the explorer; 65-75 s code view of the `to = pool` rule and the green front-run test; 75-90 s the lapsed batch with unchanged balances.
+
+## 4. Constraints
+
+- Next.js 15 App Router, TypeScript strict, Tailwind v4 (no config file), deploys to Vercel. No custom server, no filesystem writes, no server state: signatures live on chain through the relayer.
+- Aevum: chainId 44005, Shanghai EVM (`evm_version = "shanghai"`), legacy transactions (`--legacy`, `type: "legacy"` in viem), `eth_getLogs` capped at 1,000 blocks (always use `getLogsChunked`).
+- `IDENTITY.md` is law for every color, font, route, layout and animation. Colors only through `app/globals.css` tokens, no raw hex in components, sharp corners, red on one element per screen. Primitives from `components/ui/`, never bare `<button>` or `<input>`. Append to its Amendments section only.
+- Copy: English, no em dashes or en dashes, no filler vocabulary (seamless, leverage, robust, unlock and friends), plain human tone, concrete numbers.
+- Never commit `.env.local` or any private key. `RELAYER_PRIVATE_KEY` goes into Vercel env only.
+- Scope: if the deadline is at risk, cut kit signature 3 and the seller form polish before touching the sign / collect / lapsed flow.
+- Run `npm run build` after every change; it must stay green.
+
+## 5. Definition of done
+
+- QuorumPool deployed on Aevum testnet, address and verified-source (or commit) link in README.
+- Live on https://pactora.vercel.app with `NEXT_PUBLIC_CONTRACT_ADDRESS` and `RELAYER_PRIVATE_KEY` set; `mode: "live"` returned by the relay.
+- README "Live demo" line correct, Testnet addresses and real tx hashes filled.
+- The 90-second flow works end to end on testnet and with seed data when env is empty.
+- Wow moment rehearsed at least twice with five funded wallets; demo video recorded and linked in the DoraHacks form.
