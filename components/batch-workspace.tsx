@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { parseEventLogs, parseUnits, type Address, type Hex } from "viem";
 import { CampaignBoard } from "@/components/campaign-board";
+import { PoolAddress } from "@/components/pool-address";
 import { Button } from "@/components/ui/button";
 import { Card, CardBar, CardContent, CardFooter } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
@@ -12,6 +13,7 @@ import { WalletBar } from "@/components/wallet-bar";
 import { POOL_ADDRESS, publicClient, quorumPoolAbi, TUSD8_DECIMALS } from "@/lib/aevum";
 import { RECEIPT_TIMEOUT_MS, type AdapterMode } from "@/lib/config";
 import { DEMO_SIGNERS, hexFrom } from "@/lib/data/seed";
+import { shortHex } from "@/lib/format";
 import { withTimeoutAndRetry } from "@/lib/http";
 import type { Campaign } from "@/lib/types";
 import {
@@ -171,7 +173,7 @@ export function BatchWorkspace({ campaigns, initial, mode }: { campaigns: Campai
               <Label htmlFor="maker">Shop name</Label>
               <Input id="maker" value={draft.maker} onChange={set("maker")} />
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
               <div className="space-y-1.5">
                 <Label htmlFor="price">tUSD8 each</Label>
                 <Input id="price" inputMode="decimal" value={draft.price} onChange={set("price")} />
@@ -194,6 +196,11 @@ export function BatchWorkspace({ campaigns, initial, mode }: { campaigns: Campai
                 {problem}
               </p>
             )}
+            <p className="border-l-2 border-foreground pl-3 text-sm leading-relaxed">
+              {live
+                ? `Open batch sends one createPool transaction from your wallet to QuorumPool${POOL_ADDRESS ? ` ${shortHex(POOL_ADDRESS)}` : ""}, recording ${Number(draft.price) || 0} tUSD8 per order, a minimum of ${draft.minOrders || "?"} orders and a deadline ${draft.hours || "?"} hours from now. You pay the gas in tQDAY and no tUSD8 moves.`
+                : `Open batch records ${Number(draft.price) || 0} tUSD8 per order, a minimum of ${draft.minOrders || "?"} orders and a deadline ${draft.hours || "?"} hours from now. In practice mode nothing is sent to Aevum and no wallet opens.`}
+            </p>
             <WalletBar
               state={state}
               onConnect={
@@ -221,13 +228,14 @@ export function BatchWorkspace({ campaigns, initial, mode }: { campaigns: Campai
               </p>
             )}
           </CardContent>
-          <CardFooter>
+          <CardFooter className="flex-wrap">
             <Button type="submit" size="lg" disabled={busy}>
               {state.kind === "tx-pending" ? "Waiting for wallet" : "Open batch"}
             </Button>
-            <Button asChild variant="link">
+            <Button asChild variant="link" className="h-11">
               <Link href="/pledge/kavruk-guji">See a live one</Link>
             </Button>
+            <PoolAddress className="w-full" />
           </CardFooter>
         </form>
       </Card>
