@@ -8,47 +8,109 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBar, CardContent } from "@/components/ui/card";
 import {
-  aevumTestnet, cancelAuthTypedData, explorerAddress, explorerTx, isLive, POOL_ADDRESS, publicClient,
+  aevumTestnet, cancelAuthTypedData, explorerAddress, explorerTx, POOL_ADDRESS, publicClient,
   quorumPoolAbi, receiveAuthTypedData, TUSD8_DECIMALS,
 } from "@/lib/aevum";
+import type { AdapterMode } from "@/lib/config";
 import { DEMO_SIGNERS } from "@/lib/data/seed";
+import type { ErrorCode } from "@/lib/errors";
 import { formatTusd, formatUtc, shortHex } from "@/lib/format";
-import type { Campaign, Pledge } from "@/lib/types";
+import { withTimeoutAndRetry } from "@/lib/http";
+import { PRACTICE_NONCE, PRACTICE_SIGNATURE } from "@/lib/schemas";
+import type { Campaign, Pledge, RelayOk, SettleTransfer } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type LogEntry = { label: string; tx: string; mock: boolean };
 type Phase = { kind: "idle" } | { kind: "busy"; what: string } | { kind: "error"; message: string };
+type Receipt = { tx: string; mock: boolean; transfers?: SettleTransfer[]; sellerTotal?: number };
 
-async function relay(body: Record<string, unknown>): Promise<{ txHash: string; mode: "live" | "mock" }> {
+/** Codes from /api/relay plus two the browser raises itself. */
+type RoomErrorCode = ErrorCode | "wallet_missing" | "wallet_refused";
+
+class RoomError extends Error {
+  readonly code: RoomErrorCode;
+  constructor(code: RoomErrorCode, hint: string) {
+    super(hint);
+    this.code = code;
+  }
+}
+
+/** Copy is chosen by error code; the server hint is used only where it names the exact contract rule. */
+function messageFor(err: unknown, fallback: string): string {
+  if (!(err instanceof RoomError)) {
+    const text = err instanceof Error ? err.message : "";
+    return /reject|denied|cancel/i.test(text) ? "The wallet request was declined. Nothing was signed." : fallback;
+  }
+  switch (err.code) {
+    case "invalid_input":
+    case "reverted":
+      return err.message;
+    case "rate_limited":
+      return "Too many tries from this connection. Wait a minute and try again.";
+    case "upstream_timeout":
+      return "Aevum testnet is slow to answer. Nothing was charged; try again in a moment.";
+    case "upstream_error":
+    case "parse_failure":
+      return "The relayer could not reach Aevum testnet. Nothing was charged.";
+    case "not_configured":
+      return "Live relaying is switched off on this deploy. The seeded batches still work in practice mode.";
+    case "wallet_missing":
+      return "Open a browser wallet on Aevum testnet to sign.";
+    case "wallet_refused":
+      return "The wallet request was declined. Nothing was signed.";
+  }
+}
+
+async function relay(body: Record<string, unknown>): Promise<RelayOk> {
   const res = await fetch("/api/relay", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  const json = (await res.json()) as { txHash?: string; mode?: "live" | "mock"; error?: string };
-  if (!res.ok || !json.txHash) throw new Error(json.error ?? "The relayer did not answer. Try again in a moment.");
-  return { txHash: json.txHash, mode: json.mode ?? "mock" };
+  const json = (await res.json().catch(() => null)) as (Partial<RelayOk> & { error?: ErrorCode; hint?: string }) | null;
+  if (!res.ok || !json || !json.txHash) {
+    throw new RoomError(json?.error ?? "upstream_error", json?.hint ?? "The relayer did not answer.");
+  }
+  return { mode: json.mode ?? "mock", txHash: json.txHash, transfers: json.transfers, sellerTotal: json.sellerTotal };
 }
 
 function injected(): EIP1193Provider | undefined {
   return (window as unknown as { ethereum?: EIP1193Provider }).ethereum;
 }
 
-export function CampaignRoom({ campaign }: { campaign: Campaign }) {
+async function liveWallet() {
+  const eth = injected();
+  if (!eth) throw new RoomError("wallet_missing", "No browser wallet.");
+  const wallet = createWalletClient({ chain: aevumTestnet, transport: custom(eth) });
+  const [account] = await wallet.requestAddresses();
+  if (!account) throw new RoomError("wallet_refused", "No account.");
+  await wallet.switchChain({ id: aevumTestnet.id }).catch(() => wallet.addChain({ chain: aevumTestnet }));
+  return { wallet, account };
+}
+
+function readNonce(poolId: number, buyer: Address): Promise<Hex> {
+  return withTimeoutAndRetry(() =>
+    publicClient.readContract({ address: POOL_ADDRESS!, abi: quorumPoolAbi, functionName: "nonceFor", args: [BigInt(poolId), buyer] }),
+  );
+}
+
+export function CampaignRoom({ campaign, mode }: { campaign: Campaign; mode: AdapterMode }) {
   const reduce = useReducedMotion();
   const [listRef] = useAutoAnimate<HTMLOListElement>();
+  // Live only for a numeric pool id while the server says the real adapter is on.
+  // Seed slugs always stay in practice mode, whatever the deploy.
+  const live = mode === "real" && Boolean(POOL_ADDRESS) && /^\d+$/.test(campaign.id);
   const [status, setStatus] = useState(campaign.status);
   const [pledges, setPledges] = useState<Pledge[]>(campaign.pledges.filter((p) => p.state !== "withdrawn"));
   const [mine, setMine] = useState<Address | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [log, setLog] = useState<LogEntry[]>(
-    campaign.createTx !== "0x" ? [{ label: "Batch opened", tx: campaign.createTx, mock: !isLive }] : [],
+    campaign.createTx !== "0x" ? [{ label: "Batch opened", tx: campaign.createTx, mock: !live }] : [],
   );
   const [copied, setCopied] = useState(false);
-  const [settleTx, setSettleTx] = useState<{ tx: string; mock: boolean } | null>(
-    campaign.settleTx ? { tx: campaign.settleTx, mock: !isLive } : null,
+  const [receipt, setReceipt] = useState<Receipt | null>(
+    campaign.settleTx ? { tx: campaign.settleTx, mock: !live } : null,
   );
 
   const count = pledges.length;
   const ready = status === "open" && count >= campaign.minOrders;
-  const live = isLive && /^\d+$/.test(campaign.id);
-  const iAmIn = mine !== null && pledges.some((p) => p.address === mine);
+  const iAmIn = mine !== null && pledges.some((p) => p.address.toLowerCase() === mine.toLowerCase());
   // Practice mode lets the next demo wallet sign while the last one can still withdraw,
   // so the counter can be walked all the way to the threshold.
   const practiceLeft = !live && DEMO_SIGNERS.some((s) => !pledges.some((p) => p.address === s.address));
@@ -58,13 +120,10 @@ export function CampaignRoom({ campaign }: { campaign: Campaign }) {
     setPhase({ kind: "busy", what: "Waiting for your signature…" });
     try {
       let who: { buyer: string; address: Address };
-      let tx: string;
-      let mock = true;
-      if (live && injected()) {
-        const wallet = createWalletClient({ chain: aevumTestnet, transport: custom(injected()!) });
-        const [account] = await wallet.requestAddresses();
-        const poolId = BigInt(campaign.poolId);
-        const nonce = await publicClient.readContract({ address: POOL_ADDRESS!, abi: quorumPoolAbi, functionName: "nonceFor", args: [poolId, account] });
+      let r: RelayOk;
+      if (live) {
+        const { wallet, account } = await liveWallet();
+        const nonce = await readNonce(campaign.poolId, account);
         const typed = receiveAuthTypedData({
           buyer: account,
           price: parseUnits(String(campaign.pricePerOrder), TUSD8_DECIMALS),
@@ -73,26 +132,21 @@ export function CampaignRoom({ campaign }: { campaign: Campaign }) {
         });
         const signature = await wallet.signTypedData({ account, ...typed });
         setPhase({ kind: "busy", what: "Relayer is posting your signature…" });
-        const r = await relay({ action: "pledge", poolId: campaign.poolId, buyer: account, signature });
+        r = await relay({ action: "pledge", poolId: campaign.poolId, buyer: account, signature });
         who = { buyer: "You", address: account };
-        tx = r.txHash;
-        mock = r.mode === "mock";
-      } else if (live) {
-        throw new Error("Open a browser wallet on Aevum testnet to sign.");
       } else {
-        // TODO: swap mock for the live path above once the pool is deployed.
         const next = DEMO_SIGNERS.find((s) => !pledges.some((p) => p.address === s.address));
-        if (!next) throw new Error("All practice wallets have signed. Withdraw one to try again.");
-        const r = await relay({ action: "pledge", poolId: campaign.poolId, buyer: next.address, signature: "0x00" });
+        if (!next) throw new RoomError("invalid_input", "All practice wallets have signed. Withdraw one to try again.");
+        r = await relay({ action: "pledge", poolId: campaign.poolId, buyer: next.address, signature: PRACTICE_SIGNATURE, practice: true });
         who = next;
-        tx = r.txHash;
       }
+      const mock = r.mode === "mock";
       setPledges((p) => [...p, { buyer: who.buyer, address: who.address, signedAt: new Date().toISOString(), state: "signed", balance: 0 }]);
       setMine(who.address);
-      setLog((l) => [{ label: `${who.buyer} signed, no gas paid`, tx, mock }, ...l]);
+      setLog((l) => [{ label: `${who.buyer} signed, no gas paid`, tx: r.txHash, mock }, ...l]);
       setPhase({ kind: "idle" });
     } catch (err) {
-      setPhase({ kind: "error", message: err instanceof Error ? err.message.split("\n")[0] : "Signing was cancelled." });
+      setPhase({ kind: "error", message: messageFor(err, "Signing did not go through. Nothing was charged.") });
     }
   }
 
@@ -100,41 +154,41 @@ export function CampaignRoom({ campaign }: { campaign: Campaign }) {
     if (!mine) return;
     setPhase({ kind: "busy", what: "Cancelling your authorization…" });
     try {
-      let tx: string;
-      let mock = true;
-      if (live && injected()) {
-        const wallet = createWalletClient({ chain: aevumTestnet, transport: custom(injected()!) });
-        const nonce = (await publicClient.readContract({
-          address: POOL_ADDRESS!, abi: quorumPoolAbi, functionName: "nonceFor", args: [BigInt(campaign.poolId), mine],
-        })) as Hex;
+      let r: RelayOk;
+      if (live) {
+        const { wallet } = await liveWallet();
+        const nonce = await readNonce(campaign.poolId, mine);
         const signature = await wallet.signTypedData({ account: mine, ...cancelAuthTypedData({ buyer: mine, nonce }) });
-        const r = await relay({ action: "cancel", poolId: campaign.poolId, buyer: mine, nonce, signature });
-        tx = r.txHash;
-        mock = r.mode === "mock";
+        setPhase({ kind: "busy", what: "Relayer is cancelling on tUSD8, then withdrawing from the pool…" });
+        r = await relay({ action: "cancel", poolId: campaign.poolId, buyer: mine, nonce, signature });
       } else {
-        tx = (await relay({ action: "cancel", poolId: campaign.poolId, buyer: mine, nonce: "0x00", signature: "0x00" })).txHash;
+        r = await relay({
+          action: "cancel", poolId: campaign.poolId, buyer: mine, nonce: PRACTICE_NONCE, signature: PRACTICE_SIGNATURE, practice: true,
+        });
       }
       const name = pledges.find((p) => p.address === mine)?.buyer ?? "A buyer";
       setPledges((p) => p.filter((x) => x.address !== mine));
       setMine(null);
-      setLog((l) => [{ label: `${name} withdrew, authorization cancelled`, tx, mock }, ...l]);
+      setLog((l) => [{ label: `${name} withdrew, authorization cancelled`, tx: r.txHash, mock: r.mode === "mock" }, ...l]);
       setPhase({ kind: "idle" });
     } catch (err) {
-      setPhase({ kind: "error", message: err instanceof Error ? err.message.split("\n")[0] : "Withdrawal failed." });
+      setPhase({ kind: "error", message: messageFor(err, "Withdrawal did not go through. Your signature is still live.") });
     }
   }
 
   async function collect() {
     setPhase({ kind: "busy", what: `Collecting ${count} payments in one transaction…` });
     try {
-      const r = await relay({ action: "settle", poolId: campaign.poolId });
-      setSettleTx({ tx: r.txHash, mock: r.mode === "mock" });
+      const r = await relay({ action: "settle", poolId: campaign.poolId, ...(live ? {} : { practice: true }) });
+      const mock = r.mode === "mock";
+      const total = r.sellerTotal ?? count * campaign.pricePerOrder;
+      setReceipt({ tx: r.txHash, mock, transfers: r.transfers, sellerTotal: r.sellerTotal });
       setStatus("settled");
       setPledges((p) => p.map((x) => ({ ...x, state: "collected" })));
-      setLog((l) => [{ label: `${count} payments collected, ${formatTusd(count * campaign.pricePerOrder)} to ${campaign.maker}`, tx: r.txHash, mock: r.mode === "mock" }, ...l]);
+      setLog((l) => [{ label: `${count} payments collected, ${formatTusd(total)} to ${campaign.maker}`, tx: r.txHash, mock }, ...l]);
       setPhase({ kind: "idle" });
     } catch (err) {
-      setPhase({ kind: "error", message: err instanceof Error ? err.message.split("\n")[0] : "Collection reverted. Nobody was charged." });
+      setPhase({ kind: "error", message: messageFor(err, "Collection reverted. Nobody was charged.") });
     }
   }
 
@@ -145,6 +199,15 @@ export function CampaignRoom({ campaign }: { campaign: Campaign }) {
   }
 
   const pct = Math.min(100, (count / campaign.minOrders) * 100);
+  const nameOf = (a: string) => pledges.find((p) => p.address.toLowerCase() === a.toLowerCase())?.buyer ?? shortHex(a);
+
+  // Receipt rows: decoded tUSD8 transfers into the pool when the relayer sent them, else one row per signer.
+  const pool = POOL_ADDRESS?.toLowerCase();
+  const decodedIn = receipt?.transfers?.filter((t) => pool !== undefined && t.to.toLowerCase() === pool);
+  const receiptRows = decodedIn && decodedIn.length > 0
+    ? decodedIn.map((t) => ({ key: `${t.from}-${t.amount}`, buyer: nameOf(t.from), address: t.from, amount: t.amount }))
+    : pledges.map((p) => ({ key: p.address, buyer: p.buyer, address: p.address, amount: campaign.pricePerOrder }));
+  const sellerTotal = receipt?.sellerTotal ?? receiptRows.reduce((n, r) => n + r.amount, 0);
 
   return (
     <div className="grid gap-8 lg:grid-cols-12">
@@ -216,7 +279,7 @@ export function CampaignRoom({ campaign }: { campaign: Campaign }) {
           </div>
           {!live && (
             <p className="text-xs text-muted-foreground">
-              Practice mode: signatures come from demo wallets and hashes are placeholders until the pool is deployed on Aevum.
+              Practice mode: signatures come from demo wallets and hashes are placeholders, nothing is sent to Aevum.
             </p>
           )}
         </CardContent>
@@ -252,35 +315,35 @@ export function CampaignRoom({ campaign }: { campaign: Campaign }) {
           </ol>
         </Card>
 
-        {status === "settled" && settleTx && (
+        {status === "settled" && receipt && (
           <Card>
             <CardBar>
               <span>Receipt, one transaction</span>
-              <span>{count} transfers</span>
+              <span>{receiptRows.length} transfers</span>
             </CardBar>
             <div className="overflow-x-auto border-b-2 border-foreground px-4 py-2.5 text-sm">
               Settle tx{" "}
-              {settleTx.mock ? (
-                <span className="text-muted-foreground">practice {shortHex(settleTx.tx)}</span>
+              {receipt.mock ? (
+                <span className="text-muted-foreground">practice {shortHex(receipt.tx)}</span>
               ) : (
-                <a className="font-semibold underline" href={explorerTx(settleTx.tx)} target="_blank" rel="noreferrer">
-                  {shortHex(settleTx.tx)}
+                <a className="font-semibold underline" href={explorerTx(receipt.tx)} target="_blank" rel="noreferrer">
+                  {shortHex(receipt.tx)}
                 </a>
               )}
             </div>
             <ol className="divide-y-2 divide-foreground text-sm">
-              {pledges.map((p, i) => (
-                <li key={`receipt-${p.address}`} className="flex items-center justify-between gap-3 overflow-x-auto px-4 py-2">
+              {receiptRows.map((row, i) => (
+                <li key={`receipt-${row.key}`} className="flex items-center justify-between gap-3 overflow-x-auto px-4 py-2">
                   <span className="min-w-0 whitespace-nowrap">
-                    {i + 1}. {p.buyer} <span className="text-muted-foreground">{shortHex(p.address)}</span> to pool
+                    {i + 1}. {row.buyer} <span className="text-muted-foreground">{shortHex(row.address)}</span> to pool
                   </span>
-                  <span className="whitespace-nowrap">{formatTusd(campaign.pricePerOrder)}</span>
+                  <span className="whitespace-nowrap">{formatTusd(row.amount)}</span>
                 </li>
               ))}
             </ol>
             <div className="flex items-center justify-between gap-3 overflow-x-auto border-t-2 border-foreground px-4 py-2.5 text-sm font-semibold">
               <span className="whitespace-nowrap">Total to {campaign.maker}</span>
-              <span className="whitespace-nowrap">{formatTusd(count * campaign.pricePerOrder)}</span>
+              <span className="whitespace-nowrap">{formatTusd(sellerTotal)}</span>
             </div>
           </Card>
         )}

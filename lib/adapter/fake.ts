@@ -1,5 +1,6 @@
 // Fake adapter: reads the seed, answers writes with deterministic placeholder hashes.
 // No clock, no randomness, no network. The default when ADAPTER_MODE is not "real".
+// pledge / withdraw accept the optional signature and nonce of the interface and ignore them.
 import { activePledges, campaigns, getSeedCampaign, hexFrom } from "@/lib/data/seed";
 import type { Campaign } from "@/lib/types";
 import type { BatchDraftInput, CampaignAdapter, TxResult } from "./types";

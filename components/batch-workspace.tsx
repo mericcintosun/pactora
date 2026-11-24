@@ -7,7 +7,8 @@ import { CampaignBoard } from "@/components/campaign-board";
 import { Button } from "@/components/ui/button";
 import { Card, CardBar, CardContent, CardFooter } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
-import { aevumTestnet, explorerTx, isLive, POOL_ADDRESS, quorumPoolAbi, TUSD8_DECIMALS } from "@/lib/aevum";
+import { AEVUM_CHAIN_ID, aevumTestnet, explorerTx, POOL_ADDRESS, quorumPoolAbi, TUSD8_DECIMALS } from "@/lib/aevum";
+import type { AdapterMode } from "@/lib/config";
 import { hexFrom } from "@/lib/data/seed";
 import { shortHex } from "@/lib/format";
 import type { Campaign } from "@/lib/types";
@@ -26,10 +27,10 @@ type Result = { kind: "idle" } | { kind: "busy" } | { kind: "error"; message: st
  * Open a batch. Live: the seller's wallet calls QuorumPool.createPool on Aevum.
  * Mock: the batch joins the board below as a local draft with a placeholder hash.
  */
-async function createBatch(draft: BatchDraft): Promise<{ tx: string; mock: boolean }> {
+async function createBatch(draft: BatchDraft, live: boolean): Promise<{ tx: string; mock: boolean }> {
   const eth = typeof window !== "undefined" ? (window as unknown as { ethereum?: EIP1193Provider }).ethereum : undefined;
-  if (!isLive || !eth || !POOL_ADDRESS) {
-    // TODO: swap mock for the live createPool call once NEXT_PUBLIC_CONTRACT_ADDRESS is set.
+  if (!live || !eth || !POOL_ADDRESS) {
+    // Practice path: no wallet or sample-data mode. Phase 3 wires the live seller flow end to end.
     await new Promise((r) => setTimeout(r, 650));
     return { tx: `0x${hexFrom(`create:${draft.product}:${Date.now()}`, 64)}`, mock: true };
   }
@@ -47,7 +48,8 @@ async function createBatch(draft: BatchDraft): Promise<{ tx: string; mock: boole
   return { tx, mock: false };
 }
 
-export function BatchWorkspace({ campaigns, initial }: { campaigns: Campaign[]; initial: BatchDraft }) {
+export function BatchWorkspace({ campaigns, initial, mode }: { campaigns: Campaign[]; initial: BatchDraft; mode: AdapterMode }) {
+  const live = mode === "real" && Boolean(POOL_ADDRESS);
   const [draft, setDraft] = useState<BatchDraft>(initial);
   const [result, setResult] = useState<Result>({ kind: "idle" });
   const [drafts, setDrafts] = useState<Campaign[]>([]);
@@ -70,7 +72,7 @@ export function BatchWorkspace({ campaigns, initial }: { campaigns: Campaign[]; 
     if (problem) return setResult({ kind: "error", message: problem });
     setResult({ kind: "busy" });
     try {
-      const { tx, mock } = await createBatch(draft);
+      const { tx, mock } = await createBatch(draft, live);
       const id = `draft-${drafts.length + 1}`;
       const now = Date.now();
       setDrafts((list) => [
@@ -94,7 +96,7 @@ export function BatchWorkspace({ campaigns, initial }: { campaigns: Campaign[]; 
       <Card className="h-fit lg:col-span-5">
         <CardBar>
           <span>Open a batch</span>
-          <span>{isLive ? "Aevum 44005" : "Practice mode"}</span>
+          <span>{live ? `Aevum ${AEVUM_CHAIN_ID}` : "Practice mode"}</span>
         </CardBar>
         <form onSubmit={submit}>
           <CardContent className="space-y-4">

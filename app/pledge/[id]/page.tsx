@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CampaignRoom } from "@/components/campaign-room";
+import { ModeLine } from "@/components/mode-line";
 import { getAdapter } from "@/lib/adapter";
 import { explorerAddress } from "@/lib/aevum";
 import { formatTusd, formatUtc, shortHex } from "@/lib/format";
@@ -21,9 +22,13 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   };
 }
 
+// Live pools change with every signature: re-render at most every 5 seconds.
+export const revalidate = 5;
+
 export default async function CampaignPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const campaign = await getAdapter().get(id);
+  const adapter = getAdapter();
+  const campaign = await adapter.get(id);
   if (!campaign) notFound();
 
   return (
@@ -46,8 +51,9 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
           amount, and expires {formatUtc(campaign.deadline)}.
         </p>
       </header>
-      <div className="mt-10">
-        <CampaignRoom campaign={campaign} />
+      <ModeLine mode={adapter.mode} className="mt-8" />
+      <div className="mt-6">
+        <CampaignRoom campaign={campaign} mode={adapter.mode} />
       </div>
     </div>
   );

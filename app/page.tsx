@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { CampaignBoard } from "@/components/campaign-board";
+import { ModeLine } from "@/components/mode-line";
 import { SceneSlot } from "@/components/scene-slot";
 import { Button } from "@/components/ui/button";
 import { Card, CardBar, CardContent } from "@/components/ui/card";
@@ -11,8 +12,12 @@ export const metadata: Metadata = {
   title: { absolute: "Pactora: pre-orders that only charge when the batch is real" },
 };
 
+// In live mode the board includes the newest pools; refresh the static page every 30 seconds.
+export const revalidate = 30;
+
 export default async function Home() {
-  const campaigns = await getAdapter().list();
+  const adapter = getAdapter();
+  const campaigns = await adapter.list();
   const lapsed = campaigns.filter((c) => c.status === "lapsed");
   const lapsedBuyers = lapsed.reduce((n, c) => n + c.pledges.filter((p) => p.state === "expired").length, 0);
 
@@ -126,6 +131,10 @@ export default async function Home() {
           </article>
         </div>
       </section>
+
+      <div className="mx-auto max-w-6xl px-4 pb-4 pt-16">
+        <ModeLine mode={adapter.mode} className="text-xs" />
+      </div>
     </>
   );
 }

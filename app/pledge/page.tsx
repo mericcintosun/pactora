@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { BatchWorkspace, type BatchDraft } from "@/components/batch-workspace";
+import { ModeLine } from "@/components/mode-line";
 import { getAdapter } from "@/lib/adapter";
 
 export const metadata: Metadata = {
@@ -28,8 +29,9 @@ export default async function PledgeWorkspace({ searchParams }: { searchParams: 
         </p>
       </div>
       <div className="mt-10">
-        <BatchWorkspace campaigns={campaigns} initial={initial} />
+        <BatchWorkspace campaigns={campaigns} initial={initial} mode={adapter.mode} />
       </div>
+      <ModeLine mode={adapter.mode} className="mt-10 text-xs" />
     </div>
   );
 }

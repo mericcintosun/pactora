@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { SceneSlot } from "@/components/scene-slot";
 import { Card, CardBar, CardContent } from "@/components/ui/card";
-import { AEVUM_CHAIN_ID, explorerAddress, MULTICALL3, POOL_ADDRESS, TUSD8_ADDRESS } from "@/lib/aevum";
+import { explorerAddress } from "@/lib/aevum";
+import { AEVUM_CHAIN_ID, MULTICALL3, POOL_ADDRESS, TUSD8_ADDRESS } from "@/lib/config";
 
 export const metadata: Metadata = {
   title: "How it works",
@@ -23,7 +24,7 @@ export default function HowPage() {
     ["Network", `Aevum testnet, chain id ${AEVUM_CHAIN_ID}, Shanghai EVM, legacy transactions`, null],
     ["tUSD8", TUSD8_ADDRESS, explorerAddress(TUSD8_ADDRESS)],
     ["QuorumPool", POOL_ADDRESS ?? "Not deployed yet. Set NEXT_PUBLIC_CONTRACT_ADDRESS after forge script Deploy.", POOL_ADDRESS ? explorerAddress(POOL_ADDRESS) : null],
-    ["Multicall3", MULTICALL3, null],
+    ["Multicall3", MULTICALL3, explorerAddress(MULTICALL3)],
   ];
 
   return (
